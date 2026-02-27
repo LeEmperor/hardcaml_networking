@@ -1,0 +1,14 @@
+# dune
+_build/
+*.install
+
+# ocaml
+*.cm[iox]
+*.annot
+*.cmt*
+*.merlin
+
+# editor
+*.swp
+*~
+.DS_Store
