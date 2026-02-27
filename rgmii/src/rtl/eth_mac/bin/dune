@@ -1,0 +1,6 @@
+(executable
+ (public_name eth_mac)
+ (name main)
+ (libraries eth_mac hardcaml ppx_hardcaml core)
+ (preprocess (pps ppx_jane ppx_hardcaml))
+ )

@@ -1,0 +1,16 @@
+(library
+ (name rgmii_interface)
+ ; (modules rgmii_interfaces rgmii_phy rgmii_types)
+ (modules rgmii_interfaces)
+ (libraries hardcaml)
+ (preprocess (pps ppx_hardcaml ppx_jane))
+)
+
+(library
+ (name eth_mac)
+ ; (modules eth_mac mac_core crc32)
+ (modules eth_mac)
+ (libraries hardcaml rgmii_interface)
+ (preprocess (pps ppx_hardcaml ppx_jane))
+ (flags (:standard -w -27-57-33-34-35-40))
+)
