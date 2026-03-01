@@ -45,9 +45,6 @@ module O = struct
 end
 
 let create 
-  (scope)
-  (* (spec : Reg_spec.t) *)
-  spec
   (inputs: Signal.t I.t)
   : 
   (Signal.t O.t) (* returns an output O*)
