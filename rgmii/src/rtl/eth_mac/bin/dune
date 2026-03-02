@@ -1,7 +1,7 @@
 (executable
  (public_name eth_mac)
  (name main)
- (libraries eth_mac hardcaml ppx_hardcaml core rgmii_interfaces hardcaml_waveterm hardcaml_event_driven_sim)
+ (libraries eth_mac hardcaml ppx_hardcaml core rgmii_interfaces hardcaml_waveterm hardcaml_event_driven_sim async)
  (preprocess (pps ppx_jane ppx_hardcaml))
  (flags (:standard -w -27-57-33-34-35-40-63-47-26))
  )
