@@ -211,3 +211,111 @@ john_pork differentiates based on the fact that it only annotates the typing, bu
 You would still need to define the names of the inputs in the fashion "fun input1 input2 -> <implementation>".
 The way with the lots of sexps is simply sugar for the john_pork way.
 
+## Event Driven Sim Usage
+
+```
+  let build_events
+      (input : Bits.t Port.t I.t)
+      (_output : Bits.t Port.t O.t)
+      : Evsim.Event_simulator.Process.t list =
+    let open Evsim.Event_simulator in
+    let open Async.Let_syntax in   (* needed for let%bind *)
+
+    let clk_event : Process.t =
+      Rx_deser_dut.create_clock input.I.clk.signal ~time:2
+    in
+
+    (* 1. Wait N time units -------------------------------------------------- *)
+    (* Asserts rst high, waits 10 time units, then deasserts.                   *)
+    (* let%bind suspends the process and resumes after the delay.               *)
+    let wait_n_event : Process.t =
+      Async.create_process (fun () ->
+        input.I.rst.signal <-- Evsim.Logic.of_string "1";
+        let%bind () = Async.delay 10 in
+        input.I.rst.signal <-- Evsim.Logic.of_string "0";
+        Async.wait_forever ())          (* stop — otherwise it loops from top *)
+    in
+
+    (* 2. Wait for a signal toggle ------------------------------------------- *)
+    (* Asserts rst high, then waits for the clock to change (any edge) before   *)
+    (* deasserting. Chain multiple wait_for_change calls for more clock cycles.  *)
+    let wait_toggle_event : Process.t =
+      Async.create_process (fun () ->
+        input.I.rst.signal <-- Evsim.Logic.of_string "1";
+        let%bind () = Async.wait_for_change !&(input.I.clk.signal) in  (* rising  *)
+        let%bind () = Async.wait_for_change !&(input.I.clk.signal) in  (* falling *)
+        let%bind () = Async.wait_for_change !&(input.I.clk.signal) in  (* rising  *)
+        let%bind () = Async.wait_for_change !&(input.I.clk.signal) in  (* falling — 2 full cycles done *)
+        input.I.rst.signal <-- Evsim.Logic.of_string "0";
+        Async.wait_forever ())
+    in
+
+    (* 3. One-off delayed write ----------------------------------------------- *)
+    (* Uses the <--- operator to schedule a write at a future time without       *)
+    (* needing Async at all. The process body runs once at t=0, schedules the   *)
+    (* future write, then never runs again (empty sensitivity list).             *)
+    let delayed_write_event : Process.t =
+      Process.create [] (fun () ->
+        input.I.rst.signal <-- Evsim.Logic.of_string "1";
+        (input.I.rst.signal <--- Evsim.Logic.of_string "0") ~delay:10)
+    in
+
+    (* 4. Run once and stop --------------------------------------------------- *)
+    (* Async.create_process loops by default when the Deferred resolves.        *)
+    (* Ending with wait_forever () keeps the deferred permanently pending,      *)
+    (* so the function is never called again.                                    *)
+    let run_once_event : Process.t =
+      Async.create_process (fun () ->
+        input.I.rx_ctl.signal <-- Evsim.Logic.of_string "1";
+        let%bind () = Async.delay 4 in
+        input.I.rx_ctl.signal <-- Evsim.Logic.of_string "0";
+        Async.wait_forever ())          (* <-- this is what makes it "once" *)
+    in
+
+    [ clk_event; wait_n_event ]   (* swap in whichever process(es) you want *)
+    ```
+
+## stuff
+
+## Simulating DDR in EventSim
+
+```
+  (* wait until clock goes specifically high *)
+  let rec wait_rising () =
+    let%bind () = wait_for_change !&(input.I.clk.signal) in
+    if Evsim.Logic.to_bool !!(input.I.clk.signal)
+    then Async.Deferred.return ()
+    else wait_rising ()               (* was a falling edge, keep waiting *)
+  in
+
+  (* wait until clock goes specifically low *)
+  let rec wait_falling () =
+    let%bind () = wait_for_change !&(input.I.clk.signal) in
+    if not (Evsim.Logic.to_bool !!(input.I.clk.signal))
+    then Async.Deferred.return ()
+    else wait_falling ()
+  in
+```
+
+# Always DSL
+The explainer's provided on the Hardcaml docs page are very terse to say the least.
+
+## Always.Variable
+This is as close as you are going to get to the behaviour of your standard Verilog Wire/Reg.
+
+These are instantiated with an Always.Variable.Wire or Always.Variable.Reg call.
+
+```
+    let wire_thingy = Always.Variable.Wire ~default:Signal.gnd in
+```
+
+These appear to only be able to take on single bit widths. Will update once more information is known.
+
+## Always Reg
+Similar in function to a Variable, but more built to act as a reg. This needs a reg_spec to create.
+These appear to be able to take on larger bit widths than 1. Useful if you need access to something like an encoding for your FSM in debug.
+
+## Always State Machine
+"if_", "when_", and "switch" are the available items in your Always DSL to manipulate and branch logic. 
+
+

@@ -9,7 +9,7 @@
 (library
  (name rgmii_interfaces)
  ; (modules rgmii_interfaces rgmii_phy rgmii_types rx_deserializer)
- (modules rgmii_interfaces rgmii_phy rx_sink tx_source rx_deserializer)
+ (modules rgmii_interfaces rgmii_phy rx_sink tx_source rx_deserializer rx_frame_parser rx_frame_parser2)
  (libraries hardcaml hardcaml_waveterm)
  (preprocess (pps ppx_hardcaml ppx_jane))
  (wrapped false)
