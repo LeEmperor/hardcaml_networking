@@ -62,7 +62,8 @@ let create
     let state_machine = Always.State_machine.create (module States) spec ~enable:Signal.vdd in
 
     (* i wish to represent the state of the machine via some external signal *)
-    let out_state = Always.Variable.wire ~default:Signal.gnd in
+    (* let out_state = Always.Variable.wire ~default:Signal.gnd in *)
+    let out_state = Always.Variable.reg ~enable:Signal.vdd ~width:4 spec in
 
     (* standard intermediaries for output pins *)
     let out_valid : Always.Variable.t = Always.Variable.wire ~default:Signal.gnd in
