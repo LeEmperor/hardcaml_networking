@@ -45,11 +45,14 @@ end
 
 module O = struct
   type 'a t = {
-    byte : 'a [@bits 8];
+    byte  : 'a [@bits 8];
     valid : 'a;
-    sof : 'a;
-    eof : 'a;
-    err : 'a;
+    sof   : 'a;
+    eof   : 'a;
+    err   : 'a;
+    state : 'a [@bits 4];  (* debug: 1=Idle 2=Preamble 3=Data 4=Error *)
+    (* astate_bruh_state : 'a [@bits 4];  (* debug: 1=Idle 2=Preamble 3=Data 4=Error *) *)
+    (* astate_bruh_state2 : 'a [@bits 4];  (* debug: 1=Idle 2=Preamble 3=Data 4=Error *) *)
   } [@@deriving hardcaml]
 end
 
@@ -61,19 +64,17 @@ let create
     let spec : Reg_spec.t = Reg_spec.create ~clock:inputs.I.clk ~clear:inputs.rst () in
     let state_machine = Always.State_machine.create (module States) spec ~enable:Signal.vdd in
 
-    (* i wish to represent the state of the machine via some external signal *)
-    (* let out_state = Always.Variable.wire ~default:Signal.gnd in *)
-    let out_state = Always.Variable.reg ~enable:Signal.vdd ~width:4 spec in
-
     (* standard intermediaries for output pins *)
     let out_valid : Always.Variable.t = Always.Variable.wire ~default:Signal.gnd in
     let out_sof   = Always.Variable.wire ~default:Signal.gnd in
     let out_eof   = Always.Variable.wire ~default:Signal.gnd in
     let out_err   = Always.Variable.wire ~default:Signal.gnd in
 
+    let test_out = Always.Variable.wire ~default:Signal.gnd in
+
     (* const compares for the preamble and start-frame-delimiter *)
     let const_preamble = Signal.of_int ~width:8 0x55 in
-    let const_sfd = Signal.of_int ~width:8 0xDF in
+    let const_sfd = Signal.of_int ~width:8 0xD5 in
 
     (* funky binding powers affect the ability to invert this *)
     let not_valid = Signal.( ~: ) inputs.rx_valid in
@@ -83,11 +84,12 @@ let create
 
     (* main always logic *)
     Always.(compile [
+      test_out<--Signal.vdd;
+
       state_machine.switch [
 
         (* this naively assumes that there are no transmission errors during the preamble; though I suppose that it'd be fine to for a dropped preamble bit to exist *)
         States.Idle, [
-          out_state <-- Signal.of_int ~width:4 0x1;
           when_ inputs.rx_valid [
             (* if byte == preamble, goto preamble*)
             (* else if byte == sfd, goto data*)
@@ -104,7 +106,6 @@ let create
         ];
 
         States.Preamble, [
-          out_state <-- Signal.of_int ~width:4 0x2;
           when_ inputs.rx_valid [
             if_ Signal.(inputs.rx_byte ==: const_preamble)
               (* [state_machine.set_next States.Preamble] (* if preamble, stay in preamble sense*) *)
@@ -125,7 +126,6 @@ let create
         ];
 
         States.Data, [
-          out_state <-- Signal.of_int ~width:4 0x3;
           when_ inputs.rx_valid [
             out_valid <-- Signal.vdd;
 
@@ -144,7 +144,6 @@ let create
         ];
 
         States.Error, [
-          out_state <-- Signal.of_int ~width:4 0x4;
           out_err <-- Signal.vdd;
           when_ not_valid [
             state_machine.set_next States.Idle;
@@ -155,12 +154,17 @@ let create
     ]);
 
     {
-      O. (* interesting syntax defined here *)
+      O.
       byte  = inputs.rx_byte;
       valid = Always.Variable.value out_valid;
       sof   = Always.Variable.value out_sof;
       eof   = Always.Variable.value out_eof;
       err   = Always.Variable.value out_err;
+      (* state = Signal.uresize state_machine.current 4; *)
+      (* astate_bruh_state = Always.Variable.value test_out; *)
+      (* astate_bruh_state2 = Signal.uresize state_machine.current 4; *)
+      state = Signal.uresize state_machine.current 4;
+      (* state = Signal.vdd; *)
     }
 
 let () =
