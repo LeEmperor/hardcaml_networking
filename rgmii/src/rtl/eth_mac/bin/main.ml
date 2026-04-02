@@ -210,7 +210,7 @@ let () =
 (*   (* Evsim.Event_simulator.run simulator ~time_limit:200; *) *)
   Hardcaml_event_driven_sim.Waveterm.Waveform.print waves2
     ~wave_width:(-1)
-    ~display_width:180
+    ~display_width:150
     ~signals_width:30;
 
   let circ : Circuit.t =
