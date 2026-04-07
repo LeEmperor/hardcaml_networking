@@ -6,22 +6,23 @@
 ;  (flags (:standard -w -27-57-33-34-35-40-63-47-26))
 ; )
 
-(library
- (name rgmii_interfaces)
- ; (modules rgmii_interfaces rgmii_phy rgmii_types rx_deserializer)
- (modules rgmii_interfaces rgmii_phy rx_sink tx_source rx_deserializer)
- (libraries hardcaml hardcaml_waveterm)
- (preprocess (pps ppx_hardcaml ppx_jane))
- (wrapped false)
- (flags (:standard -w -27-57-33-34-35-40-63-47-26))
-)
+; (library
+;  (name rgmii_interfaces)
+;  ; (modules rgmii_interfaces rgmii_phy rgmii_types rx_deserializer)
+;  (modules rgmii_interfaces rgmii_phy rx_sink tx_source rx_deserializer rx_frame_parser)
+;  (libraries hardcaml hardcaml_waveterm)
+;  (preprocess (pps ppx_hardcaml ppx_jane))
+;  (wrapped false)
+;  (flags (:standard -w -27-57-33-34-35-40-63-47-26))
+; )
 
 (library
  (name eth_mac)
  ; (modules eth_mac mac_core crc32)
- (modules eth_mac)
- (libraries hardcaml rgmii_interfaces)
+ (modules eth_mac rgmii_interfaces rgmii_phy rx_sink tx_source rx_deserializer rx_frame_parser)
+ (libraries hardcaml ppx_jane ppx_hardcaml)
  (preprocess (pps ppx_hardcaml ppx_jane))
+ (wrapped false)
  (flags (:standard -w -27-57-33-34-35-40-63-47))
 )
 

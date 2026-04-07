@@ -12,3 +12,9 @@ _build/
 *.swp
 *~
 .DS_Store
+
+#claude
+CLAUDE.md
+
+#questa
+test_questa_proj/

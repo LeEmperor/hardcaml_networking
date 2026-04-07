@@ -29,7 +29,8 @@ module I = struct
     clk_div2 : 'a; (* 62.5 MHz clock for byte sync *)
 
     rst : 'a;
-    rx_data : 'a array [@length 4];
+    (* rx_data : 'a array [@length 4]; *)
+    rx_data : 'a [@bits 4];
     rx_ctl : 'a;
   } [@@deriving hardcaml]
 end
@@ -45,9 +46,6 @@ module O = struct
 end
 
 let create 
-  (scope)
-  (* (spec : Reg_spec.t) *)
-  spec
   (inputs: Signal.t I.t)
   : 
   (Signal.t O.t) (* returns an output O*)
@@ -85,8 +83,10 @@ let create
   let _ =
   Always.(
     compile [
-      data_upper <-- Signal.concat_msb (Array.to_list inputs.I.rx_data);
-      data_lower <-- Signal.concat_msb (Array.to_list inputs.I.rx_data);
+      (* data_upper <-- Signal.concat_msb (Array.to_list inputs.I.rx_data); *)
+      (* data_lower <-- Signal.concat_msb (Array.to_list inputs.I.rx_data); *)
+      data_upper <-- inputs.I.rx_data;
+      data_lower <-- inputs.I.rx_data
     ]
   ) in
 
