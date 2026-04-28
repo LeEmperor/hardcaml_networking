@@ -54,12 +54,7 @@ module States = struct
 end
 
 let create 
-  (scope)
-  (spec : Reg_spec.t)
-  (* spec *)
-  (inputs: Signal.t I.t)
-  : 
-  (Signal.t O.t) (* returns an output O*)
+  inputs : (_ O.t)
   = 
   (*
     Spec: specific rising_edge spec
@@ -70,13 +65,13 @@ let create
   in
 
   let datapath_inst : Signal.t Rx_datapath.O.t = 
-    Rx_datapath.create scope rising_edge {
+    Rx_datapath.create {
       Rx_datapath.I.placeholder_in = zero 1;
     }
   in
 
   let controller_inst : Signal.t Rx_controller.O.t = 
-    Rx_controller.create scope rising_edge {
+    Rx_controller.create {
       Rx_controller.I.clk = inputs.I.rx_clk;
       rst = inputs.I.reset;
       en = inputs.I.rx_master_enable;

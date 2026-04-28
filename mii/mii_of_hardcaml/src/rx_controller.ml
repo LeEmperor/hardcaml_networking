@@ -1,6 +1,7 @@
 open! Core
 open! Hardcaml
 open! Signal
+open! Always
 
 let () =
   Stdio.print_endline "=== Imported rx_controller ==="
@@ -42,11 +43,9 @@ module States = struct
 end
 
 let create 
-  (scope)
-  (spec : Reg_spec.t) 
-  (inputs: Signal.t I.t)
-  : (Signal.t O.t)
+  (inputs) : (Signal.t O.t)
   =
+  let open Variable in
 
   (*
     Spec: specific rising_edge spec
@@ -60,21 +59,21 @@ let create
   let not_rx_er = (~: (inputs.I.rx_er) ) in
 
   (* internal aliases *)
-  let rx_er = inputs.I.rx_er in
-  let rx_dv = inputs.I.rx_dv in
-  let in_data = inputs.I.rx_data in
-  let stable = ( not_rx_dv |: rx_er ) in
+  let rx_er     = inputs.I.rx_er in
+  let rx_dv     = inputs.I.rx_dv in
+  let in_data   = inputs.I.rx_data in
+  let stable    = ( not_rx_dv |: rx_er ) in
 
   (* const params *)
   let const_0xD5 = of_int_trunc ~width:8 0xD5 in
   let const_0x55 = of_int_trunc ~width:8 0x55 in
 
   (* internal regs *)
-  let mac_byte_count = Always.Variable.reg ~enable:vdd ~width:3 rising_edge in
+  let mac_byte_count = reg ~enable:vdd ~width:3 rising_edge in
 
   let sm = 
     (* let not_rx_dv = Signal.(~:) inputs.I.rx_dv in *)
-    Always.State_machine.create (module States) ~enable:vdd rising_edge in
+    State_machine.create (module States) ~enable:vdd rising_edge in
 
     Always.(compile [
       sm.switch [

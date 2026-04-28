@@ -9,6 +9,8 @@ let () =
 
 module I = struct
   type 'a t = {
+    clk       : 'a;
+    rst       : 'a;
     rx_data   : 'a [@bits 4];
     en        : 'a;
   } [@@deriving hardcaml]
@@ -22,12 +24,18 @@ module O = struct
 end
 
 let create 
-  (scope) (spec) (inputs) : (_ O.t) = 
+  (inputs) : (_ O.t) = 
     (* port aliases *)
     let rx_data = inputs.I.rx_data in
     let en      = inputs.I.en in
+    let clk     = inputs.I.clk in
+    let rst     = inputs.I.rst in
 
-    let byte_valid = wire ~default:gnd () in
+    (* reg spec *)
+    let spec : Reg_spec.t = Reg_spec.create ~clock:clk ~clear:rst () in
+
+    (* internal wires *)
+    let byte_valid = reg ~enable:vdd ~width:1 spec in
     let data_upper = reg ~enable:vdd ~width:4 spec in
     let data_lower = reg ~enable:vdd ~width:4 spec in
     let have_upper = reg ~enable:vdd ~width:1 spec in
@@ -35,8 +43,8 @@ let create
     (* floating always block *)
       Always.(
         compile [
+          byte_valid <--. 0;
           if_ (inputs.en) [
-            (* if en *)
             if_ (have_upper.value) [
               data_lower <-- rx_data;
               have_upper <--. 0;
