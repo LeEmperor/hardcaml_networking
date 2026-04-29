@@ -4,59 +4,59 @@ open! Mii_of_hardcaml
 open! Hardcaml_waveterm
 
 let () =
-  print_endline "=== Running  MAC RX Top Testbench ===";;
+  print_endline "=== Running  MAC RX Datapath Testbench ===";;
 
 module Waveform = Hardcaml_waveterm.Waveform
-module Sim = Cyclesim.With_interface(Mac_top.I)(Mac_top.O)
+module Sim = Cyclesim.With_interface(Rx_datapath.I)(Rx_datapath.O)
 (* we hand Sim's namespace a create function and it does the heavy lifting because the shapes were known from the earlier functor call *)
 
 let create_sim () 
   =
-  let sim                     = Sim.create Mac_top.create in
-  let waves, sim              = Waveform.create sim in
-  let inputs  : _ Mac_top.I.t = Cyclesim.inputs sim in
-  let outputs : _ Mac_top.O.t = Cyclesim.outputs sim in
+  let sim                               = Sim.create Rx_datapath.create in
+  let waves, sim                        = Waveform.create sim in
+  let inputs  : _ Rx_datapath.I.t = Cyclesim.inputs sim in
+  let outputs : _ Rx_datapath.O.t = Cyclesim.outputs sim in
   (sim, waves, inputs, outputs)
 
 let () = 
-  (* sim instance *)
   let open Bits in
   let sim, waves, inputs, outputs = create_sim () in
 
   (* vcd wrapper *)
-  Out_channel.with_file "waves_top.vcd" ~f:(fun oc->
+  Out_channel.with_file "waves_datapath.vcd" ~f:(fun oc->
   let sim = Vcd.wrap oc sim in
 
-  (* signal aliases *)
-  let t_clk   = inputs.clock in
-  let t_rst   = inputs.reset in
-  let t_en    = inputs.en in
-
-  let t_in    = inputs.rx_data in
-  let t_rx_dv = inputs.rx_dv in
-  let t_rx_er = inputs.rx_er in
-
-  let t_out   = outputs.m_axis_tdata in
-  let t_keep  = outputs.m_axis_tkeep in
-  let t_last  = outputs.m_axis_tlast in
-  let t_valid = outputs.m_axis_tvalid in
-  let t_user  = outputs.m_axis_tuser in
-
   (* display helper *)
-  let cycle () =
+ let cycle () =
     Cyclesim.cycle sim;
+    (* printf "rx_data=%x rx_dv=%d rx_er=%d rx_en=%d\n" *)
+    (*   (Bits.to_int_trunc !(inputs.rx_data)) *)
+    (*   (Bits.to_int_trunc !(inputs.rx_dv)) *)
+    (*   (Bits.to_int_trunc !(inputs.rx_er)) *)
+    (*   (Bits.to_int_trunc !(inputs.rx_master_enable)) *)
   in
-
+  
   (* assign helper *)
   let (<--) r i = r := Bits.of_int_trunc ~width:(Bits.width !r) i in
 
-  (* helpers *)
+  (* signal aliases *)
+  let t_clk   = inputs.clk in
+  let t_rst   = inputs.rst in
+  let t_en    = inputs.byte_assembler_en in
+
+  let t_in    = inputs.rx_data in
+  let t_payload_sel = inputs.payload_sel in
+
+  let t_out       = outputs.payload_out in
+  let t_out_valid = outputs.payload_out_valid in
+
   let reset () =
     t_en  <-- 0;
     t_rst <-- 1;
     cycle ();
-    t_en <-- 1;
     t_rst <-- 0;
+    t_en <-- 1;
+    t_in <-- 0;
   in
 
   let send lo hi =
@@ -83,13 +83,20 @@ let () =
   (* -- test 1: 0x55 for a while -> expect state=PREAMBLE -- *)
   printf "\n[test 1] 0x55";
   reset ();
-  for i = 0x30 to 0x36 do
-    (* send_byte i; *)
+
+  for i = 0 to 5 do
+    (* send_byte 0x55; *)
     t_in <-- 0x5;
     cycle();
-    t_in <-- 0x6;
+    t_in <-- 0x5;
     cycle();
   done;
+
+  t_payload_sel <-- 1;
+  for i = 0x61 to 0x67 do
+    send_byte i;
+  done;
+
   idle ();
 
   (* tail cycle *)

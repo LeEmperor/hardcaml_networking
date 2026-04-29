@@ -7,21 +7,19 @@ let () =
 
 module I = struct
   type 'a t = {
+    (* spec *)
+    clock     : 'a; (* rx_clk *)
+    reset     : 'a; (* rx rst *)
+    en        : 'a;
+
     (* ethernet phy lines *)
-    rx_clk  : 'a; (* rx_clk *)
-    rst     : 'a; (* rx rst *)
     rx_dv   : 'a; (* activity line *)
     rx_er   : 'a; (* phy error line *)
     rx_data : 'a [@bits 4];
-    rx_master_enable : 'a;
 
     (* axis exposed out signals *)
     (* Logic -> PHY *)
-    s_axis_tdata  : 'a [@bits 8]; (* 1 byte *)
-    s_axis_tkeep  : 'a;
-    s_axis_tlast  : 'a;
-    s_axis_tvalid : 'a;
-    s_axis_tuser  : 'a;
+    m_axis_tready : 'a;
   } [@@deriving hardcaml]
 end
 
@@ -34,6 +32,14 @@ module O = struct
     m_axis_tlast  : 'a;
     m_axis_tvalid : 'a;
     m_axis_tuser  : 'a;
+
+    debug_datapath_d_out : 'a [@bits 8];
+    debug_datapath_byte_assembler_d_out : 'a [@bits 8];
+
+    debug_controller_en_loopback : 'a;
+    debug_controller_current_state : 'a [@bits 3];
+
+    (* debug_state_vec : 'a [@bits 3]; *)
   } [@@deriving hardcaml]
 end
 
@@ -56,15 +62,15 @@ let create
     let open Variable in
 
     (* port aliases *)
-    let clk  = inputs.I.rx_clk in
-    let rst  = inputs.I.rst in
-    let en   = inputs.I.rx_master_enable in
+    let clk  = inputs.I.clock in
+    let rst  = inputs.I.reset in
+    let en   = inputs.I.en in
     let d_in = inputs.I.rx_data in
     let d_out = Signal.wire 8 in
 
   let rising_edge : Reg_spec.t = 
     (* Reg_spec.create ~clock:inputs.I.clk ~reset:inputs.I.rst ()  *)
-    Reg_spec.create ~clock:inputs.I.rx_clk ~clear:inputs.I.rst() 
+    Reg_spec.create ~clock:clk ~clear:rst () 
   in
 
   (* internal ties *)
@@ -72,6 +78,7 @@ let create
   let wire_byte_assembler_en  = Signal.wire 1 in
   let wire_byte_out           = Signal.wire 8 in
   let wire_byte_out_valid     = Signal.wire 1 in
+  let wire_payload_sel        = Signal.wire 1 in
 
   let datapath_inst : Signal.t Rx_datapath.O.t = 
     Rx_datapath.create {
@@ -80,32 +87,41 @@ let create
       Rx_datapath.I.clk = clk;
       Rx_datapath.I.rst = rst;
       Rx_datapath.I.en  = rst;
+      Rx_datapath.I.payload_sel = wire_payload_sel;
     }
   in
 
   let controller_inst : Signal.t Rx_controller.O.t = 
     Rx_controller.create {
-      Rx_controller.I.clk = inputs.I.rx_clk;
+      Rx_controller.I.clk = clk;
       rst             = rst;
       en              = en;
       rx_dv           = inputs.I.rx_dv;
       rx_er           = inputs.I.rx_er;
       rx_data_valid   = wire_byte_out_valid;
-      rx_data         = wire_byte_out;
+      (* rx_data         = wire_byte_out; *)
+      rx_data         = datapath_inst.payload_out;
     }
   in
 
   (* wire assigns *)
   Signal.(wire_byte_assembler_en <-- controller_inst.byte_assembler_en);
-  Signal.(wire_byte_out          <-- datapath_inst.d_out);
-  Signal.(wire_byte_out_valid    <-- datapath_inst.d_out_valid);
+  Signal.(wire_byte_out          <-- datapath_inst.payload_out);
+  Signal.(wire_byte_out_valid    <-- datapath_inst.payload_out_valid);
+  Signal.(wire_payload_sel       <-- controller_inst.payload_sel);
 
   {
-    m_axis_tdata  = zero 8;
+    m_axis_tdata  = datapath_inst.payload_out;
     m_axis_tuser  = Signal.gnd;
     m_axis_tvalid = Signal.gnd;
     m_axis_tlast  = Signal.gnd;
     m_axis_tkeep  = Signal.gnd;
+
+    (* debug drawout *)
+    debug_datapath_d_out = datapath_inst.payload_out;
+    debug_datapath_byte_assembler_d_out = datapath_inst.debug_byte_assembler_d_out;
+    debug_controller_en_loopback = controller_inst.debug_en;
+    debug_controller_current_state = controller_inst.debug_state_vec; 
   }
 
 

@@ -24,13 +24,14 @@ end
 
 module O = struct
   type 'a t = {
-    d_out : 'a;
     byte_assembler_en : 'a;
+    payload_sel : 'a;
 
     (* debug lines *)
-    state_map_vec : 'a [@bits 3];
-    stable : 'a;
-    debug_byte_valid : 'a;
+    debug_state_vec   : 'a [@bits 3];
+    debug_stable          : 'a;
+    debug_byte_valid      : 'a;
+    debug_en              : 'a;
   } [@@deriving hardcaml]
 end
 
@@ -68,9 +69,13 @@ let create
   let valid         = inputs.I.rx_data_valid in
   let stable        = ( (not_rx_dv |: rx_er) &: en) in
 
+  (* this would like to be a wire instead? essentially a mux *)
+  (* let reg_payload_sel   = reg ~enable:vdd ~width:1 rising_edge in *)
+  let payload_sel   = reg ~enable:vdd ~width:1 rising_edge in
+
   (* const params *)
   let const_0xD5 = of_int_trunc ~width:8 0xD5 in
-  let const_0x55 = of_int_trunc ~width:8 0x01 in
+  let const_0x55 = of_int_trunc ~width:8 0x55 in
 
   (* internal regs *)
   let mac_byte_count = reg ~enable:vdd ~width:3 rising_edge in
@@ -83,6 +88,9 @@ let create
     State_machine.create (module States) ~enable:vdd rising_edge in
 
     Always.(compile [
+      (* default value *)
+      payload_sel <--. 0;
+
       when_ (valid) [
         sm.switch ~default:[sm.set_next IDLE] [
 
@@ -152,9 +160,10 @@ let create
             if_ (rx_dv) [
               (* keep taking payload *)
               sm.set_next PAYLOAD;
+              payload_sel <--. 1;
             ] [
               (* payload finishsed *)
-              sm.set_next DONE;
+              sm.set_next PREAMBLE;
             ];
           ];
         ];
@@ -166,10 +175,13 @@ let create
     );
 
   {
-    d_out               = zero 1;
-    byte_assembler_en   = inputs.I.en; (* byte assembler is how we branch, therefore it should be on when we are also on, with WE = controller*)
-    state_map_vec = sm.current;
-    stable = stable;
-    debug_byte_valid = valid;
+    byte_assembler_en     = inputs.I.en; (* byte assembler is how we branch, therefore it should be on when we are also on, with WE = controller*)
+    (* payload_sel        = reg_payload_sel.value; *)
+    payload_sel           = payload_sel.value;
+
+    debug_state_vec       = sm.current;
+    debug_stable          = stable;
+    debug_byte_valid      = valid;
+    debug_en              = en;
   }
 

@@ -2,6 +2,7 @@ open! Core
 open! Hardcaml
 open! Mii_of_hardcaml
 open! Hardcaml_waveterm
+(* open! Bits *)
 
 let () =
   print_endline "=== Running MAC RX Controller Testbench ===";;
@@ -13,29 +14,29 @@ module Sim = Cyclesim.With_interface(Rx_controller.I)(Rx_controller.O)
 let create_sim () 
   =
   let sim                               = Sim.create Rx_controller.create in
-  let waves, sim                        = Waveform.create sim in
+  (* let waves, sim                        = Waveform.create sim in *)
   let inputs  : _ Rx_controller.I.t = Cyclesim.inputs sim in
   let outputs : _ Rx_controller.O.t = Cyclesim.outputs sim in
-  (sim, waves, inputs, outputs)
+  (* (sim, waves, inputs, outputs) *)
+  (sim, inputs, outputs)
+
+  (* Hardcaml.Vcd.wrap : (string -> unit) -> ('i, 'o) Cyclesim.t -> ('i, 'o) Cyclesim.t *)
+  (* 
+     3 args: 
+        1. (string, unit) tuple?
+        2. Cyclesim.t object
+        3. returns Cyclesim.t object
+  *)
 
 let () = 
   let open Bits in
-  let sim, waves, inputs, outputs = create_sim () in
+  (* let sim, waves, inputs, outputs = create_sim () in *)
+  let sim, inputs, outputs = create_sim () in
 
-  (* state fmt helper *)
-  let state_fmt = 
-    Wave_format.Custom(fun bits ->
-      match Bits.to_int_trunc bits with
-      | 0 -> "IDLE"
-      | 1 -> "PREAMBLE"
-      | 2 -> "DST_MAC"
-      | _ -> "???")
-  in
+  Out_channel.with_file "waves.vcd" ~f:(fun oc ->
+  let sim = Vcd.wrap oc sim in
 
   (* display helper *)
-  (* let cycle () = *)
-  (*   Cyclesim.cycle sim; *)
-  (* in *)
 
  let cycle () =
     Cyclesim.cycle sim;
@@ -57,6 +58,7 @@ let () =
   let t_en    = inputs.en in
   let t_in    = inputs.rx_data in
   let t_in_valid = inputs.rx_data_valid in
+  let t_rx_dv = inputs.rx_dv in
 
   let t_byte_assembler_en =  outputs.byte_assembler_en in
   let t_state_vec = outputs.state_map_vec in
@@ -65,6 +67,7 @@ let () =
   let reset () =
     t_en  <-- 0;
     t_rst <-- 1;
+    t_rx_dv <-- 0;
     cycle ();
     t_rst <-- 0;
   in
@@ -80,12 +83,19 @@ let () =
   in
 
   let send_byte byte =
-    let hi = (byte lsr 4) land 0xF in
+    let hi = (byte lsl 4) land 0xF in
     let lo = byte land 0xF in
     send hi lo;
 
     printf "\n==Byte sent: == %d ==\n" byte;
     (* slice the byte in half, how do we do more advanced math with a hex value? *)
+  in
+
+  let send_byte_oneshot byte =
+    t_en <-- 1;
+    t_in_valid <-- 1;
+    t_in <-- byte;
+    cycle();
   in
 
   let idle () =
@@ -94,53 +104,49 @@ let () =
   in
 
   (* -- test 1: 0x55 for a while -> expect state=PREAMBLE -- *)
-  printf "\n[test 1] 0x55";
+  printf "\n[test 1] STUFF ";
   reset ();
-  send_byte 0x1;
-  send_byte 0x1;
-  send_byte 0x1;
-  send_byte 0x1;
+
+  (*PREAMBLE*)
+  send_byte_oneshot 0x55;
+  send_byte_oneshot 0x55;
+  send_byte_oneshot 0x55;
+  send_byte_oneshot 0x55;
+
+  (* SFD *)
+  send_byte_oneshot 0xD5;
+
+  (* DST MAC *)
+  for i = 0x20 to 0x26 do
+    send_byte_oneshot i;
+  done;
+
+  (* SRC MAC*)
+  for i = 0x30 to 0x36 do
+    send_byte_oneshot i;
+  done;
+
+  (* ETH_TYPE *)
+  send_byte_oneshot 0x11;
+  send_byte_oneshot 0x22;
+
+  (* PAYLOAD *)
+  for i = 0x01 to 0x40 do
+    send_byte_oneshot i;
+  done;
+
+  (* drive frame finish *)
+  t_rx_dv <-- 1;
+
+  (* tail cycle *)
+  for i = 0 to 10 do
+    cycle();
+  done;
+
   idle ();
-
   cycle();
-  cycle();
-  cycle();
-
-  (* (* -- test 2: back-to-back bytes without idle -- *) *)
-  (* printf "\n[test 2] back-to-back: 0xC,0xD then 0xE,0xF -> expect 0xCD then 0xEF\n"; *)
-  (* reset (); *)
-  (* send 0xC 0xD; *)
-  (* send 0xE 0xF; *)
-  (* idle (); *)
-  (**)
-  (* (* -- test 3: en drops mid-byte, then resumes -- *) *)
-  (* printf "\n[test 3] upper nibble 0x3, en drops, then 0x4,0x5 -> expect 0x45\n"; *)
-  (* reset (); *)
-  (* t_en <-- 1; *)
-  (* t_in <-- 0x3; *)
-  (* cycle ();          (* upper=0x3, have_upper=1 *) *)
-  (* idle ();           (* en drops — have_upper stays 1 *) *)
-  (* send 0x4 0x5;      (* resumes: 0x4 taken as upper, 0x5 as lower -> 0x45 *) *)
-  (* idle (); *)
-
-  (* Waveform.print ~display_width:80 waves; *)
-
-  print_endline "hi";
-  Waveform.print
-    ~display_width:130
-    ~display_height:20
-    ~display_values:true
-    ~display_rules:[
-      Display_rule.port_name_is "rx_data"          ~wave_format:Hex;
-      Display_rule.port_name_is "rx_master_enable" ~wave_format:Bit;
-      Display_rule.port_name_is "rx_dv"            ~wave_format:Bit;
-      Display_rule.port_name_is "rx_er"            ~wave_format:Bit;
-      Display_rule.port_name_is "stable"           ~wave_format:Bit;
-      Display_rule.port_name_is "debug_byte_valid" ~wave_format:Bit;
-      Display_rule.port_name_is "state_map_vec"    ~wave_format:state_fmt;
-      Display_rule.default;
-    ]
-    waves;
 
   print_endline "\n=== SIMULATION COMPLETE ===";
+  )
 ;;
+

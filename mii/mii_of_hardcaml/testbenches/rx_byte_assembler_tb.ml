@@ -22,6 +22,10 @@ let () =
   let open Bits in
   let sim, waves, inputs, outputs = create_sim () in
 
+  (* vcd wrap *)
+  Out_channel.with_file "waves_byte_assembler.vcd" ~f:(fun oc->
+    let sim = Vcd.wrap oc sim in
+
   (* display helper *)
   let cycle () =
     Cyclesim.cycle sim;
@@ -43,6 +47,7 @@ let () =
     t_rst <-- 1;
     cycle ();
     t_rst <-- 0;
+    cycle();
   in
 
   let send lo hi =
@@ -88,6 +93,7 @@ let () =
   send 0x0 0x0;
   idle ();
 
-  Waveform.print ~display_width:150 waves;
+  (* Waveform.print ~display_width:150 waves; *)
   print_endline "\n=== SIMULATION COMPLETE ===";
+  )
 
