@@ -3,7 +3,7 @@ open! Hardcaml
 open! Signal
 
 let () =
-  Stdio.print_endline "=== Imported MAC RX Controller ==="
+  Stdio.print_endline "=== Imported MAC RX Controller (explicit state) ==="
 
 module I = struct
   type 'a t = {
@@ -29,8 +29,6 @@ module O = struct
 
     (* debug lines *)
     state_map_vec : 'a [@bits 3];
-    stable : 'a;
-    debug_byte_valid : 'a;
   } [@@deriving hardcaml]
 end
 
@@ -56,6 +54,10 @@ let create
     Reg_spec.create ~clock:inputs.I.clk ~clear:inputs.I.rst ()
   in
 
+  (* state items *)
+  let current_state = reg ~enable:vdd ~width:3 rising_edge in
+  let next_state    = Variable.wire ~default:current_state.value in
+
   (* negates *)
   let not_rx_dv = (~: (inputs.I.rx_dv) ) in
   let not_rx_er = (~: (inputs.I.rx_er) ) in
@@ -65,12 +67,12 @@ let create
   let rx_dv         = inputs.I.rx_dv in
   let in_data       = inputs.I.rx_data in
   let en            = inputs.I.en in
-  let valid         = inputs.I.rx_data_valid in
-  let stable        = ( (not_rx_dv |: rx_er) &: en) in
+  let valid = inputs.I.rx_data_valid in
+  let stable        = ( not_rx_dv |: rx_er &: en) in
 
   (* const params *)
   let const_0xD5 = of_int_trunc ~width:8 0xD5 in
-  let const_0x55 = of_int_trunc ~width:8 0x01 in
+  let const_0x55 = of_int_trunc ~width:8 0x55 in
 
   (* internal regs *)
   let mac_byte_count = reg ~enable:vdd ~width:3 rising_edge in
@@ -79,11 +81,27 @@ let create
   (*   {} *)
   (* in *)
 
-  let sm = 
+  (* state machine encoder function *)
+  let state_width : int = Int.ceil_log2 (List.length States.all) in
+  let enc (s : States.t) = 
+    List.findi_exn States.all ~f:(fun _ x -> States.compare x s = 0)
+    |> fst
+    |> Signal.of_int_trunc ~width:state_width
+  in
+  
+  let sm : States.t State_machine.t = 
     State_machine.create (module States) ~enable:vdd rising_edge in
 
     Always.(compile [
+      next_state () <-- current_state.value;
+
       when_ (valid) [
+        switch current_state.value [
+          enc IDLE, [
+            if_ (stable) [] []
+          ];
+        ];
+
         sm.switch ~default:[sm.set_next IDLE] [
 
         IDLE, [
@@ -169,7 +187,5 @@ let create
     d_out               = zero 1;
     byte_assembler_en   = inputs.I.en; (* byte assembler is how we branch, therefore it should be on when we are also on, with WE = controller*)
     state_map_vec = sm.current;
-    stable = stable;
-    debug_byte_valid = valid;
   }
 

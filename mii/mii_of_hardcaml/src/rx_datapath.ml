@@ -7,29 +7,40 @@ let () =
 
 module I = struct
   type 'a t = {
-    placeholder_in : 'a;
+    clk : 'a;
+    rst : 'a;
+    en  : 'a;
+
+    byte_assembler_en : 'a;
+    rx_data : 'a [@bits 4];
   } [@@deriving hardcaml]
 end
 
 module O = struct
   type 'a t = {
-    placeholder_out : 'a;
+    d_out         : 'a [@bits 8];
+    d_out_valid   : 'a;
   } [@@deriving hardcaml]
 end
 
 let create 
-  (inputs : _ I.t) : _ O.t
+  (inputs) : _ O.t
   = 
-  let byte_assembler_inst =
-    Rx_byte_assembler.create {
-      Rx_byte_assembler.I.rx_data = zero 4;
-      Rx_byte_assembler.I.en      = zero 1;
-      Rx_byte_assembler.I.clk     = zero 1;
-      Rx_byte_assembler.I.rst     = zero 1;
-    }
-  in
+  (* port aliases *) (* possible to make a function that auto makes the port aliases for me? *)
+    let clk = inputs.I.clk in
+    let rst = inputs.I.rst in
 
-  {
-    placeholder_out = zero 1;
-  }
+    let byte_assembler_inst =
+      Rx_byte_assembler.create {
+        Rx_byte_assembler.I.rx_data = inputs.I.rx_data;
+        Rx_byte_assembler.I.en      = inputs.I.byte_assembler_en;
+        Rx_byte_assembler.I.clk     = clk;
+        Rx_byte_assembler.I.rst     = rst;
+      }
+    in
+
+    {
+      d_out       = zero 8;
+      d_out_valid = zero 1;
+    }
 
