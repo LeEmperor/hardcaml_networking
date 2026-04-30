@@ -1,6 +1,8 @@
 open! Core
 open! Hardcaml
 open! Signal
+open! Always
+open! Variable
 
 let () =
   Stdio.print_endline "=== Imported MAC RX Controller ==="
@@ -26,12 +28,15 @@ module O = struct
   type 'a t = {
     byte_assembler_en : 'a;
     payload_sel : 'a;
+    dst_mac_reg_en : 'a;
+    src_mac_reg_en : 'a;
 
     (* debug lines *)
     debug_state_vec   : 'a [@bits 3];
     debug_stable          : 'a;
     debug_byte_valid      : 'a;
     debug_en              : 'a;
+    debug_d_in            : 'a [@bits 8];
   } [@@deriving hardcaml]
 end
 
@@ -79,6 +84,8 @@ let create
 
   (* internal regs *)
   let mac_byte_count = reg ~enable:vdd ~width:3 rising_edge in
+  let dst_mac_reg_en = reg ~enable:vdd ~width:1 rising_edge in
+  let src_mac_reg_en = reg ~enable:vdd ~width:1 rising_edge in
 
   (* let debug_block = *)
   (*   {} *)
@@ -87,9 +94,21 @@ let create
   let sm = 
     State_machine.create (module States) ~enable:vdd rising_edge in
 
-    Always.(compile [
+    compile [
       (* default value *)
       payload_sel <--. 0;
+      dst_mac_reg_en <--. 0;
+      src_mac_reg_en <--. 0;
+
+      (* moore-ish? *)
+      sm.switch ~default:[] [
+        DST_MAC, [
+          dst_mac_reg_en <--. 1;
+        ];
+        SRC_MAC, [
+          src_mac_reg_en <--. 1;
+        ];
+      ];
 
       when_ (valid) [
         sm.switch ~default:[sm.set_next IDLE] [
@@ -102,7 +121,9 @@ let create
           if_ (stable) [
             Always.switch in_data [
               const_0x55, [sm.set_next PREAMBLE];
-              const_0xD5, [sm.set_next DST_MAC];
+              const_0xD5, [
+                sm.set_next DST_MAC; 
+              ];
             ]
           ] [
             sm.set_next IDLE;
@@ -127,6 +148,10 @@ let create
           if_ (stable) [
             if_ (mac_byte_count.value ==: of_int_trunc ~width:3 5) [
               mac_byte_count <-- of_int_trunc ~width:3 0;
+              (* very odd timing issue that requires the register enable to be high one longer cycle *)
+              (* might be more easily remediable with a moore approach, but why doesnt the mealy work? *)
+              (* my thought is that the byte valid is a moore based assignment from the byte assembler, therefore *)
+              (* my assignments following have to be in the moore domain *)
               sm.set_next ETH_TYPE;
             ] [
               (* mac_byte_count <-- mac_byte_count.value +: (of_int_trunc ~width:3 1); *)
@@ -168,20 +193,27 @@ let create
           ];
         ];
 
-        (* DONE, [sm.set_next DONE]; *)
+        DONE, [sm.set_next DONE];
       ] (* sm.switch[] *)
-    ] (* when_ (valid)[] *)
-    ] (* Always.(compile[]) *)
-    );
+    ]   (* when_ (valid)[] *)
+    ];  (* compile[] *)
+
+    (* (* moore assignments *) *)
+    (* compile [ *)
+    (*   (* defaults *) *)
+    (* ]; *)
 
   {
     byte_assembler_en     = inputs.I.en; (* byte assembler is how we branch, therefore it should be on when we are also on, with WE = controller*)
     (* payload_sel        = reg_payload_sel.value; *)
     payload_sel           = payload_sel.value;
+    dst_mac_reg_en        = dst_mac_reg_en.value;
+    src_mac_reg_en        = src_mac_reg_en.value;
 
     debug_state_vec       = sm.current;
     debug_stable          = stable;
     debug_byte_valid      = valid;
     debug_en              = en;
+    debug_d_in            = in_data;
   }
 

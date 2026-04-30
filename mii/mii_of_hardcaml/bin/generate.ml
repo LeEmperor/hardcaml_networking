@@ -3,7 +3,7 @@ open! Hardcaml
 open! Mii_of_hardcaml
 
 let () =
-  Mac_top.nothing_burger (); (* being removed shortly *)
+  (* Mac_top.nothing_burger (); (* being removed shortly *) *)
 
   Stdio.print_endline "============ Begin Generation Phase ============ ";
   let global_spec = Signal.Reg_spec.create ~clock:(Signal.input "clk" 1) in

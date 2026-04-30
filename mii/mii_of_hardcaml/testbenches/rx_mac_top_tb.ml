@@ -59,10 +59,10 @@ let () =
     t_rst <-- 0;
   in
 
-  let send lo hi =
-    t_in <-- lo;
-    cycle ();
+  let send hi lo =
     t_in <-- hi;
+    cycle ();
+    t_in <-- lo;
     cycle ();
   in
 
@@ -75,6 +75,26 @@ let () =
     (* slice the byte in half, how do we do more advanced math with a hex value? *)
   in
 
+  let send_dst_mac_addr mac_addr = 
+    printf "\ndst_mac_addr: %X" mac_addr;
+    for i = 0 to 5 do
+      (* printf "\ndst_mac_addr left shift %d bytes: %X" (i) (dst_mac_addr lsr (8 * i)); *)
+      let send_target = (mac_addr lsr (8 * i)) land 0xFF in
+      send_byte send_target;
+      printf "sending portion: %X" send_target;
+    done;
+  in
+
+  let send_src_mac_addr mac_addr = 
+    printf "\nsrc_mac_addr: %X" mac_addr;
+    for i = 0 to 5 do
+      (* printf "\ndst_mac_addr left shift %d bytes: %X" (i) (dst_mac_addr lsr (8 * i)); *)
+      let send_target = (mac_addr lsr (8 * i)) land 0xFF in
+      send_byte send_target;
+      printf "sending portion: %X" send_target;
+    done;
+  in
+
   let idle () =
     t_en <-- 0;
     cycle ();
@@ -83,19 +103,30 @@ let () =
   (* -- test 1: 0x55 for a while -> expect state=PREAMBLE -- *)
   printf "\n[test 1] 0x55";
   reset ();
-  for i = 0x30 to 0x36 do
-    (* send_byte i; *)
-    t_in <-- 0x5;
-    cycle();
-    t_in <-- 0x6;
-    cycle();
+  t_rx_dv <-- 0;
+
+  (* sit preamble *)
+  for i = 0 to 5 do
+    send_byte 0x55;
   done;
-  idle ();
+
+  (* SFD *)
+  (* cycle(); *)
+  (* cycle(); *)
+  send_byte 0xD5;
+
+  send_dst_mac_addr 0x71_72_73_74_75_76;
+  send_src_mac_addr 0x66_65_64_63_62_61;
+  cycle();
+  cycle();
+
+  t_rx_dv <-- 1;
 
   (* tail cycle *)
   for i = 0 to 10 do
     cycle();
   done;
+  idle();
 
   print_endline "\n=== SIMULATION COMPLETE ===";
   )
