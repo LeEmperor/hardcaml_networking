@@ -34,11 +34,11 @@ module O = struct
     m_axis_tuser  : 'a;
 
     (* datapath debug ties *)
-    debug_datapath_d_out : 'a [@bits 8];
-    debug_datapath_byte_assembler_d_out : 'a [@bits 8];
-    debug_datapath_byte_assembler_d_out_valid : 'a;
-    debug_datapath_dst_addr : 'a [@bits 48];
-    debug_datapath_src_addr : 'a [@bits 48];
+    (* debug_datapath_d_out : 'a [@bits 8]; *)
+    (* debug_datapath_byte_assembler_d_out : 'a [@bits 8]; *)
+    (* debug_datapath_byte_assembler_d_out_valid : 'a; *)
+    (* debug_datapath_dst_addr : 'a [@bits 48]; *)
+    (* debug_datapath_src_addr : 'a [@bits 48]; *)
     (* debug_datapath_raw_byte_out : 'a [@bits 8]; *)
 
     (* controller debug ties *)
@@ -48,6 +48,7 @@ module O = struct
     debug_controller_d_in_loopback : 'a [@bits 8];
 
     (* debug_state_vec : 'a [@bits 3]; *)
+    keep : 'a;
   } [@@deriving hardcaml]
 end
 
@@ -64,6 +65,7 @@ module States = struct
 end
 
 let create 
+  (scope : Scope.t )
   inputs : (_ O.t)
   = 
     let open Always in
@@ -90,8 +92,12 @@ let create
   let wire_dst_mac_reg_en     = Signal.wire 1 in
   let wire_src_mac_reg_en     = Signal.wire 1 in
 
+  let keep = Signal.wire 1 in
+
   let datapath_inst : Signal.t Rx_datapath.O.t = 
-    Rx_datapath.create {
+    Rx_datapath.create 
+      scope
+    {
       Rx_datapath.I.rx_data           = d_in;
       Rx_datapath.I.byte_assembler_en = wire_byte_assembler_en;
       Rx_datapath.I.clk               = clk;
@@ -124,6 +130,8 @@ let create
   Signal.(wire_dst_mac_reg_en    <-- controller_inst.dst_mac_reg_en);
   Signal.(wire_src_mac_reg_en    <-- controller_inst.src_mac_reg_en);
 
+  let keep = reduce ~f:(|:) (bits_lsb datapath_inst.keep) in
+
   {
     m_axis_tdata  = datapath_inst.payload_out;
     m_axis_tuser  = Signal.gnd;
@@ -132,11 +140,11 @@ let create
     m_axis_tkeep  = Signal.gnd;
 
     (* debug drawout *)
-    debug_datapath_d_out        = datapath_inst.payload_out;
-    debug_datapath_byte_assembler_d_out = datapath_inst.debug_byte_assembler_d_out;
-    debug_datapath_byte_assembler_d_out_valid = datapath_inst.debug_byte_assembler_d_out_valid;
-    debug_datapath_src_addr = datapath_inst.debug_src_addr;
-    debug_datapath_dst_addr = datapath_inst.debug_dst_addr;
+    (* debug_datapath_d_out        = datapath_inst.payload_out; *)
+    (* debug_datapath_byte_assembler_d_out = datapath_inst.debug_byte_assembler_d_out; *)
+    (* debug_datapath_byte_assembler_d_out_valid = datapath_inst.debug_byte_assembler_d_out_valid; *)
+    (* debug_datapath_src_addr = datapath_inst.debug_src_addr; *)
+    (* debug_datapath_dst_addr = datapath_inst.debug_dst_mac; *)
 
     (* debug_datapath_raw_byte_out = datapath_inst.raw_byte_out; *)
 
@@ -144,6 +152,7 @@ let create
     debug_controller_current_state  = controller_inst.debug_state_vec; 
     debug_controller_stable         = controller_inst.debug_stable;
     debug_controller_d_in_loopback  = controller_inst.debug_d_in;
+    keep = keep;
   }
 
 

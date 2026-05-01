@@ -1,8 +1,17 @@
-open! Core
-open! Hardcaml
-open! Signal
-open! Always
-open! Variable
+(* 
+  Bohdan Purtell
+  University of Florida
+
+  Module: Rx_controller
+  This module serves as an FSM controller for the receive path of my Hardcaml 
+  ethernet MAC.
+*)
+
+open Core
+open Hardcaml
+open Signal
+open Always
+open Variable
 
 let () =
   Stdio.print_endline "=== Imported MAC RX Controller ==="
@@ -95,12 +104,12 @@ let create
     State_machine.create (module States) ~enable:vdd rising_edge in
 
     compile [
-      (* default value *)
-      payload_sel <--. 0;
-      dst_mac_reg_en <--. 0;
-      src_mac_reg_en <--. 0;
+      (* default values *)
+      payload_sel     <--. 0;
+      dst_mac_reg_en  <--. 0;
+      src_mac_reg_en  <--. 0;
 
-      (* moore-ish? *)
+      (* moore assigments *)
       sm.switch ~default:[] [
         DST_MAC, [
           dst_mac_reg_en <--. 1;
@@ -110,6 +119,7 @@ let create
         ];
       ];
 
+      (* next state logic *)
       when_ (valid) [
         sm.switch ~default:[sm.set_next IDLE] [
 
@@ -197,11 +207,6 @@ let create
       ] (* sm.switch[] *)
     ]   (* when_ (valid)[] *)
     ];  (* compile[] *)
-
-    (* (* moore assignments *) *)
-    (* compile [ *)
-    (*   (* defaults *) *)
-    (* ]; *)
 
   {
     byte_assembler_en     = inputs.I.en; (* byte assembler is how we branch, therefore it should be on when we are also on, with WE = controller*)

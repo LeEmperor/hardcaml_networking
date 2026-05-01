@@ -12,7 +12,8 @@ module Sim = Cyclesim.With_interface(Mac_top.I)(Mac_top.O)
 
 let create_sim () 
   =
-  let sim                     = Sim.create Mac_top.create in
+  let top_tb_scope : Scope.t = Scope.create ~flatten_design:true ~auto_label_hierarchical_ports:true () in
+  let sim = Sim.create ~config:Cyclesim.Config.trace_all (Mac_top.create top_tb_scope) in
   let waves, sim              = Waveform.create sim in
   let inputs  : _ Mac_top.I.t = Cyclesim.inputs sim in
   let outputs : _ Mac_top.O.t = Cyclesim.outputs sim in

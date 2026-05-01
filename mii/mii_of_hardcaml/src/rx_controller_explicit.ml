@@ -1,3 +1,15 @@
+(* 
+  Bohdan Purtell
+  University of Florida
+
+  Module: Rx_controller_explicit 
+  This module serves as a more explicit controller of the rx path, with the intention that the
+  current_state and next_state values are both grabbable by debug, instead of running with the
+  standard 1-state implementation paradigm of an FSM. 
+
+  Why Hardcaml doesn't support this already is beyond me.
+*)
+
 open! Core
 open! Hardcaml
 open! Signal
