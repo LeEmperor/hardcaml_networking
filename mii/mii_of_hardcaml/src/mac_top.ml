@@ -33,21 +33,7 @@ module O = struct
     m_axis_tvalid : 'a;
     m_axis_tuser  : 'a;
 
-    (* datapath debug ties *)
-    (* debug_datapath_d_out : 'a [@bits 8]; *)
-    (* debug_datapath_byte_assembler_d_out : 'a [@bits 8]; *)
-    (* debug_datapath_byte_assembler_d_out_valid : 'a; *)
-    (* debug_datapath_dst_addr : 'a [@bits 48]; *)
-    (* debug_datapath_src_addr : 'a [@bits 48]; *)
-    (* debug_datapath_raw_byte_out : 'a [@bits 8]; *)
-
-    (* controller debug ties *)
-    debug_controller_en_loopback : 'a;
-    debug_controller_current_state : 'a [@bits 3];
-    debug_controller_stable : 'a;
-    debug_controller_d_in_loopback : 'a [@bits 8];
-
-    (* debug_state_vec : 'a [@bits 3]; *)
+    (* debug lines *)
     keep : 'a;
   } [@@deriving hardcaml]
 end
@@ -78,59 +64,69 @@ let create
     let d_in = inputs.I.rx_data in
     let d_out = Signal.wire 8 in
 
-  let rising_edge : Reg_spec.t = 
-    (* Reg_spec.create ~clock:inputs.I.clk ~reset:inputs.I.rst ()  *)
-    Reg_spec.create ~clock:clk ~clear:rst () 
-  in
+    let rising_edge : Reg_spec.t = 
+      Reg_spec.create ~clock:clk ~clear:rst () 
+    in
 
-  (* internal ties *)
-  (* let wire_byte_assembler_en = wire ~default:gnd in (* does this autosize? *) *)
-  let wire_byte_assembler_en  = Signal.wire 1 in
-  let wire_byte_out           = Signal.wire 8 in
-  let wire_byte_out_valid     = Signal.wire 1 in
-  let wire_payload_sel        = Signal.wire 1 in
-  let wire_dst_mac_reg_en     = Signal.wire 1 in
-  let wire_src_mac_reg_en     = Signal.wire 1 in
+    (* internal ties *)
+    (* let wire_byte_assembler_en = wire ~default:gnd in (* does this autosize? *) *)
+    let wire_byte_assembler_en  = Signal.wire 1 in
+    let wire_raw_byte_out       = Signal.wire 8 in
+    let wire_raw_byte_out_valid = Signal.wire 1 in
+    let wire_payload_sel        = Signal.wire 1 in
+    let wire_dst_mac_reg_en     = Signal.wire 1 in
+    let wire_src_mac_reg_en     = Signal.wire 1 in
+    let wire_eth_type_reg_en    = Signal.wire 1 in
 
-  let keep = Signal.wire 1 in
+    let keep = Signal.wire 1 in
 
-  let datapath_inst : Signal.t Rx_datapath.O.t = 
-    Rx_datapath.create 
-      scope
-    {
-      Rx_datapath.I.rx_data           = d_in;
-      Rx_datapath.I.byte_assembler_en = wire_byte_assembler_en;
-      Rx_datapath.I.clk               = clk;
-      Rx_datapath.I.rst               = rst;
-      Rx_datapath.I.en                = rst;
-      Rx_datapath.I.payload_sel       = wire_payload_sel;
-      Rx_datapath.I.dst_mac_reg_en    = wire_dst_mac_reg_en;
-      Rx_datapath.I.src_mac_reg_en    = wire_src_mac_reg_en;
-    }
-  in
+    let datapath_inst : Signal.t Rx_datapath.O.t = 
+      Rx_datapath.create 
+        scope
+      {
+        Rx_datapath.I.rx_data           = d_in;
+        Rx_datapath.I.byte_assembler_en = wire_byte_assembler_en;
+        Rx_datapath.I.clk               = clk;
+        Rx_datapath.I.rst               = rst;
+        Rx_datapath.I.en                = rst;
+        Rx_datapath.I.payload_sel       = wire_payload_sel;
+        Rx_datapath.I.dst_mac_reg_en    = wire_dst_mac_reg_en;
+        Rx_datapath.I.src_mac_reg_en    = wire_src_mac_reg_en;
+        Rx_datapath.I.eth_type_reg_en   = wire_eth_type_reg_en;
+      }
+    in
 
-  let controller_inst = 
-    Rx_controller.create {
-      Rx_controller.I.clk = clk;
-      rst             = rst;
-      en              = en;
-      rx_dv           = inputs.I.rx_dv;
-      rx_er           = inputs.I.rx_er;
-      rx_data_valid   = wire_byte_out_valid;
-      (* rx_data         = wire_byte_out; *)
-      rx_data         = datapath_inst.raw_byte_out;
-    }
-  in
+    let controller_inst = 
+      Rx_controller.create 
+        scope
+      {
+        Rx_controller.I.clk = clk;
+        rst             = rst;
+        en              = en;
+        rx_dv           = inputs.I.rx_dv;
+        rx_er           = inputs.I.rx_er;
+        rx_data_valid   = wire_raw_byte_out_valid;
+        (* rx_data         = wire_byte_out; *)
+        rx_data         = datapath_inst.raw_byte_out;
+      }
+    in
 
   (* wire assigns *)
-  Signal.(wire_byte_assembler_en <-- controller_inst.byte_assembler_en);
-  Signal.(wire_byte_out          <-- datapath_inst.payload_out);
-  Signal.(wire_byte_out_valid    <-- datapath_inst.payload_out_valid);
-  Signal.(wire_payload_sel       <-- controller_inst.payload_sel);
-  Signal.(wire_dst_mac_reg_en    <-- controller_inst.dst_mac_reg_en);
-  Signal.(wire_src_mac_reg_en    <-- controller_inst.src_mac_reg_en);
+  Signal.(wire_raw_byte_out          <-- datapath_inst.raw_byte_out);
+  Signal.(wire_raw_byte_out_valid    <-- datapath_inst.raw_byte_out_valid);
 
-  let keep = reduce ~f:(|:) (bits_lsb datapath_inst.keep) in
+  Signal.(wire_byte_assembler_en  <-- controller_inst.byte_assembler_en);
+  Signal.(wire_payload_sel        <-- controller_inst.payload_sel);
+  Signal.(wire_dst_mac_reg_en     <-- controller_inst.dst_mac_reg_en);
+  Signal.(wire_src_mac_reg_en     <-- controller_inst.src_mac_reg_en);
+  Signal.(wire_eth_type_reg_en    <-- controller_inst.eth_type_reg_en);
+
+
+  (* can i map this to a function that lets me auto-bind the keep functionality? *)
+  let keep = reduce ~f:(|:) (
+      (bits_lsb datapath_inst.keep) @ 
+      (bits_lsb controller_inst.keep)
+  ) in
 
   {
     m_axis_tdata  = datapath_inst.payload_out;
@@ -139,19 +135,6 @@ let create
     m_axis_tlast  = Signal.gnd;
     m_axis_tkeep  = Signal.gnd;
 
-    (* debug drawout *)
-    (* debug_datapath_d_out        = datapath_inst.payload_out; *)
-    (* debug_datapath_byte_assembler_d_out = datapath_inst.debug_byte_assembler_d_out; *)
-    (* debug_datapath_byte_assembler_d_out_valid = datapath_inst.debug_byte_assembler_d_out_valid; *)
-    (* debug_datapath_src_addr = datapath_inst.debug_src_addr; *)
-    (* debug_datapath_dst_addr = datapath_inst.debug_dst_mac; *)
-
-    (* debug_datapath_raw_byte_out = datapath_inst.raw_byte_out; *)
-
-    debug_controller_en_loopback    = controller_inst.debug_en;
-    debug_controller_current_state  = controller_inst.debug_state_vec; 
-    debug_controller_stable         = controller_inst.debug_stable;
-    debug_controller_d_in_loopback  = controller_inst.debug_d_in;
     keep = keep;
   }
 

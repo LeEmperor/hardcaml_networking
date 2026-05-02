@@ -19,7 +19,7 @@ module I : sig
     (* control lines  *)
     rx_dv : 'a;
     rx_er : 'a;
-    
+
     (* data line -> rxd presents Preamble/SFD *)
     rx_data       : 'a [@bits 8];
     rx_data_valid : 'a;
@@ -29,18 +29,18 @@ end
 module O : sig
   type 'a t = {
     byte_assembler_en : 'a;
+
+    dst_mac_reg_en  : 'a;
+    src_mac_reg_en  : 'a;
+    eth_type_reg_en : 'a;
+
     payload_sel : 'a;
-    dst_mac_reg_en : 'a;
-    src_mac_reg_en : 'a;
+    payload_out_valid : 'a;
 
     (* debug lines *)
-    debug_state_vec       : 'a [@bits 3];
-    debug_stable          : 'a;
-    debug_byte_valid      : 'a;
-    debug_en              : 'a;
-    debug_d_in            : 'a [@bits 8];
+    keep : 'a;
   } [@@deriving hardcaml ]
 end
 
-val create : Signal.t I.t -> Signal.t O.t
+val create : Scope.t -> Signal.t I.t -> Signal.t O.t
 

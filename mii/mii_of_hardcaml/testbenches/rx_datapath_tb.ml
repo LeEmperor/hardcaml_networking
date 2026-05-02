@@ -44,7 +44,7 @@ let () =
   let t_payload_sel = inputs.payload_sel in
 
   let t_out       = outputs.payload_out in
-  let t_out_valid = outputs.payload_out_valid in
+  (* let t_out_valid = outputs.payload_out_valid in *)
 
   let reset () =
     t_en  <-- 0;

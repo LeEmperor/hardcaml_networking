@@ -67,30 +67,22 @@ let () =
     cycle ();
   in
 
+  (* this sends in little-endian (computer order?) *)
+  (* for example 0x12_34 becomes 34 then 12, with an SRL getting 0x3412 across 2 cycles *)
   let send_byte byte =
     let hi = (byte lsr 4) land 0xF in
     let lo = byte land 0xF in
     send hi lo;
 
-    printf "\n==Byte sent: == %d ==\n" byte;
+    printf "\n==Byte sent: == %X ==\n" byte;
     (* slice the byte in half, how do we do more advanced math with a hex value? *)
   in
 
-  let send_dst_mac_addr mac_addr = 
-    printf "\ndst_mac_addr: %X" mac_addr;
-    for i = 0 to 5 do
-      (* printf "\ndst_mac_addr left shift %d bytes: %X" (i) (dst_mac_addr lsr (8 * i)); *)
-      let send_target = (mac_addr lsr (8 * i)) land 0xFF in
-      send_byte send_target;
-      printf "sending portion: %X" send_target;
-    done;
-  in
-
-  let send_src_mac_addr mac_addr = 
-    printf "\nsrc_mac_addr: %X" mac_addr;
-    for i = 0 to 5 do
-      (* printf "\ndst_mac_addr left shift %d bytes: %X" (i) (dst_mac_addr lsr (8 * i)); *)
-      let send_target = (mac_addr lsr (8 * i)) land 0xFF in
+  (* let send_bytes (name: string) (bytes: int) (n_bytes: int) =  *)
+  let send_bytes name n_bytes bytes = 
+    printf "\nsending %s: %d bytes : %X" name n_bytes bytes;
+    for i = 0 to (n_bytes - 1) do
+      let send_target = (bytes lsr (8 * i)) land 0xFF in
       send_byte send_target;
       printf "sending portion: %X" send_target;
     done;
@@ -112,15 +104,23 @@ let () =
   done;
 
   (* SFD *)
-  (* cycle(); *)
-  (* cycle(); *)
   send_byte 0xD5;
 
-  send_dst_mac_addr 0x71_72_73_74_75_76;
-  send_src_mac_addr 0x66_65_64_63_62_61;
+  send_bytes "dst_mac"  6  0x71_72_73_74_75_76;
+  send_bytes "src_mac"  6  0x66_65_64_63_62_61;
+  send_bytes "eth type" 2  0x67_65;
+  (* send_bytes "payload"  10 0x12_34_56_78_90; *)
+  send_byte 0x12;
+  send_byte 0x34;
+  send_byte 0x56;
+  send_byte 0x78;
+
+  t_in <-- 0;
+
   cycle();
   cycle();
 
+  (* declare data in-valid from PHY line *)
   t_rx_dv <-- 1;
 
   (* tail cycle *)

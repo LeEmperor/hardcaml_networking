@@ -61,8 +61,8 @@ let () =
   let t_rx_dv = inputs.rx_dv in
 
   let t_byte_assembler_en =  outputs.byte_assembler_en in
-  let t_state_vec = outputs.debug_state_vec in
-  let t_stable = outputs.debug_stable in
+  (* let t_state_vec = outputs.debug_state_vec in *)
+  (* let t_stable = outputs.debug_stable in *)
 
   let reset () =
     t_en  <-- 0;
