@@ -1,4 +1,5 @@
 open Hardcaml
+open Base
 
 (** this is the tx source - with which the PHY is fed information from *)
 module I = struct 

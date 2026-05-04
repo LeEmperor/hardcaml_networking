@@ -1,6 +1,6 @@
 (executable
  (public_name eth_mac)
- (name main)
+ (name main) 
  (libraries
             hardcaml 
             ppx_hardcaml 

@@ -17,9 +17,9 @@
 ; )
 
 (library
- (name eth_mac)
+ (name lib_eth_mac)
  ; (modules eth_mac mac_core crc32)
- (modules eth_mac rgmii_interfaces rgmii_phy rx_sink tx_source rx_deserializer rx_frame_parser)
+ (modules eth_mac rgmii_interfaces rgmii_phy rx_sink tx_source rx_deserializer)
  (libraries hardcaml ppx_jane ppx_hardcaml)
  (preprocess (pps ppx_hardcaml ppx_jane))
  (wrapped false)

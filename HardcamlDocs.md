@@ -319,3 +319,35 @@ These appear to be able to take on larger bit widths than 1. Useful if you need 
 "if_", "when_", and "switch" are the available items in your Always DSL to manipulate and branch logic. 
 
 
+
+# ASCII Waveform Usage
+```
+  (* print_endline "hi"; *)
+  (* Waveform.print *)
+  (*   ~display_width:130 *)
+  (*   ~display_height:20 *)
+  (*   ~display_values:true *)
+  (*   ~display_rules:[ *)
+  (*     Display_rule.port_name_is "rx_data"          ~wave_format:Hex; *)
+  (*     Display_rule.port_name_is "rx_master_enable" ~wave_format:Bit; *)
+  (*     Display_rule.port_name_is "rx_dv"            ~wave_format:Bit; *)
+  (*     Display_rule.port_name_is "rx_er"            ~wave_format:Bit; *)
+  (*     Display_rule.default; *)
+  (*   ] *)
+  (*   waves; *)
+  ```
+
+# Waveform Enum Handling
+  (* let state_fmt =  *)
+  (*   Wave_format.Custom(fun bits -> *)
+  (*     match Bits.to_int_trunc bits with *)
+  (*     | 0 -> "IDLE" *)
+  (*     | 1 -> "PREAMBLE" *)
+  (*     | 2 -> "DST_MAC" *)
+  (*     | 3 -> "SRC_MAC" *)
+  (*     | 4 -> "ETH_TYPE" *)
+  (*     | 5 -> "PAYLOAD" *)
+  (*     | 6 -> "DONE" *)
+  (*     | _ -> "???") *)
+  (* in *)
+

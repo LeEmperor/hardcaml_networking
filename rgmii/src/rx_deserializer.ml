@@ -21,7 +21,9 @@
         sample the rx_data line and write these into the lower nibble of the byte-to-be-transmitted
  *)
 
-open Hardcaml
+open! Hardcaml
+open! Signal
+open! Base
 
 module I = struct
   type 'a t = {
@@ -104,4 +106,5 @@ let create
   }
 
 let () = 
-  print_endline "deserializer lib imported!"
+  Stdio.print_endline "deserializer lib imported!"
+
