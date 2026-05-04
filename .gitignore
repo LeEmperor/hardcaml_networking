@@ -25,3 +25,4 @@ bazel-*
 _opam/
 env.sh
 .bazelrc
+MODULE.bazel.lock
