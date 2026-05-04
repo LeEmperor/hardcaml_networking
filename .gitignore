@@ -16,3 +16,9 @@ _build/
 *.exe
 *.bc
 CLAUDE.md
+
+# build system
+third_party/bazel/bazel
+.bazelisk/
+bazel-*
+_opam/
