@@ -21,4 +21,7 @@ CLAUDE.md
 third_party/bazel/bazel
 .bazelisk/
 bazel-*
+.tools/
 _opam/
+env.sh
+.bazelrc
