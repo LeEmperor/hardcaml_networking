@@ -34,7 +34,7 @@ let () =
   (* Generate *)
   (* this means that "rtl" is a function that takes in Circuit.t and returns unit*)
   (* as compared to an expression, which would just have : unit as the return*)
-  let rtl : Circuit.t -> unit = Rtl.output Verilog in
+  let rtl : Circuit.t -> unit = Rtl.print Verilog in
   (* rtl circ; *)
 
   (* let () = Rtl.print Verilog circ in *)
@@ -81,7 +81,7 @@ let () =
   (* Helper function to set 4-bit data *)
   let set_data value =
     Array.iteri (fun i port ->
-      port := Bits.of_int ~width:1 ((value lsr i) land 1)
+      port := Bits.of_int_trunc ~width:1 ((value lsr i) land 1)
     ) sim_data
   in
   

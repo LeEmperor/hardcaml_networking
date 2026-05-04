@@ -1,4 +1,6 @@
-open Hardcaml
+open! Hardcaml
+open! Signal 
+open! Core
 
 module I = struct
   type 'a t = {
