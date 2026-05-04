@@ -1,7 +1,11 @@
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 exports_files(
-    ["dune_dir.sh"],
+    [
+        "dune_dir.sh",
+        "dune_tb.sh",
+        "open_wave.sh",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -32,5 +36,18 @@ sh_binary(
 sh_binary(
     name = "exec",
     srcs = ["dune_exec.sh"],
+    visibility = ["//visibility:public"],
+)
+
+
+sh_binary(
+    name = "dune_tb",
+    srcs = ["dune_tb.sh"],
+    visibility = ["//visibility:public"],
+)
+
+sh_binary(
+    name = "open_wave",
+    srcs = ["open_wave.sh"],
     visibility = ["//visibility:public"],
 )
