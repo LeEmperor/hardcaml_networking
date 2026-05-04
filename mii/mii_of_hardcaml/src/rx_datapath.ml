@@ -4,7 +4,7 @@ open! Signal
 open! Always
 open! Variable
 
-(* config option for a fifo or not at the very end of the rx path *)
+(* config option for a fifo or not at the very end of the rx path ? *)
 
 let () =
   Stdio.print_endline "=== Imported MAC RX Datapath ==="
