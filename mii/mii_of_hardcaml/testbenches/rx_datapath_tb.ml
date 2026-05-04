@@ -10,9 +10,10 @@ module Waveform = Hardcaml_waveterm.Waveform
 module Sim = Cyclesim.With_interface(Rx_datapath.I)(Rx_datapath.O)
 (* we hand Sim's namespace a create function and it does the heavy lifting because the shapes were known from the earlier functor call *)
 
-let create_sim () 
+let create_sim ()
   =
-  let sim                               = Sim.create Rx_datapath.create in
+  let scope = Scope.create ~flatten_design:true ~auto_label_hierarchical_ports:true () in
+  let sim   = Sim.create ~config:Cyclesim.Config.trace_all (Rx_datapath.create scope) in
   let waves, sim                        = Waveform.create sim in
   let inputs  : _ Rx_datapath.I.t = Cyclesim.inputs sim in
   let outputs : _ Rx_datapath.O.t = Cyclesim.outputs sim in
@@ -29,11 +30,6 @@ let () =
   (* display helper *)
  let cycle () =
     Cyclesim.cycle sim;
-    (* printf "rx_data=%x rx_dv=%d rx_er=%d rx_en=%d\n" *)
-    (*   (Bits.to_int_trunc !(inputs.rx_data)) *)
-    (*   (Bits.to_int_trunc !(inputs.rx_dv)) *)
-    (*   (Bits.to_int_trunc !(inputs.rx_er)) *)
-    (*   (Bits.to_int_trunc !(inputs.rx_master_enable)) *)
   in
   
   (* assign helper *)
@@ -44,11 +40,11 @@ let () =
   let t_rst   = inputs.rst in
   let t_en    = inputs.byte_assembler_en in
 
-  let t_in    = inputs.rx_data in
+  let t_in          = inputs.rx_data in
   let t_payload_sel = inputs.payload_sel in
 
   let t_out       = outputs.payload_out in
-  let t_out_valid = outputs.payload_out_valid in
+  (* let t_out_valid = outputs.payload_out_valid in *)
 
   let reset () =
     t_en  <-- 0;
