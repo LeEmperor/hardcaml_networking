@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SWITCH="${OPAM_SWITCH:-oxcaml-5.2-hardcaml}"
+SWITCH="${OPAM_SWITCH:-5.2.0+ox}"
 REQUIRED_OCAML_PREFIX="${REQUIRED_OCAML_PREFIX:-5.2}"
 BAZELISK_VERSION="${BAZELISK_VERSION:-v1.22.1}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BAZEL_DIR="$ROOT/third_party/bazel"
-BAZEL="$BAZEL_DIR/bazel"
+TOOLS_BIN="$ROOT/.tools/bin"
+BAZEL="$TOOLS_BIN/bazel"
 
 die() {
   echo "error: $*" >&2
@@ -32,11 +32,11 @@ detect_platform() {
   echo "${os}-${arch}"
 }
 
-download_bazelisk() {
-  mkdir -p "$BAZEL_DIR"
+install_bazelisk() {
+  mkdir -p "$TOOLS_BIN"
 
   if [ -x "$BAZEL" ]; then
-    echo "Using repo-local Bazel launcher: $BAZEL"
+    echo "Using repo-local bazel: $BAZEL"
     return
   fi
 
@@ -44,7 +44,7 @@ download_bazelisk() {
   platform="$(detect_platform)"
   url="https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-${platform}"
 
-  echo "Installing repo-local Bazelisk:"
+  echo "Installing repo-local bazel launcher..."
   echo "  $url"
   echo "  -> $BAZEL"
 
@@ -73,7 +73,7 @@ check_oxcaml_switch() {
     cat >&2 <<EOF
 error: required opam switch '$SWITCH' was not found.
 
-Create the shared OxCaml switch once on this machine, for example:
+Create it once on this machine with:
 
   opam update --all
   opam switch create $SWITCH 5.2.0+ox \\
@@ -82,10 +82,6 @@ Create the shared OxCaml switch once on this machine, for example:
 Then rerun:
 
   ./bootstrap.sh
-
-Or use a different existing switch:
-
-  OPAM_SWITCH=<switch-name> ./bootstrap.sh
 EOF
     exit 1
   fi
@@ -103,32 +99,50 @@ EOF
 
   echo "Using opam switch: $SWITCH"
   echo "OCaml version: $version"
-  echo "OCaml compiler: $compiler"
+  echo "Compiler: $compiler"
 }
 
-install_ocaml_deps() {
-  echo "Installing repo OCaml dependencies into switch '$SWITCH'..."
+write_env_file() {
+  cat > "$ROOT/env.sh" <<EOF
+# Source this file from the repo root:
+#   source ./env.sh
+
+export OPAM_SWITCH="${SWITCH}"
+export PATH="${TOOLS_BIN}:\$PATH"
+EOF
+
+  echo "Wrote env.sh"
+}
+
+install_deps() {
+  echo "Installing repo dependencies into opam switch '$SWITCH'..."
   opam install . \
     --switch="$SWITCH" \
     --deps-only \
     --with-test \
-    --with-dev-setup \
     -y
 }
 
 main() {
   cd "$ROOT"
 
-  download_bazelisk
+  install_bazelisk
   check_opam
   check_oxcaml_switch
-  install_ocaml_deps
+  write_env_file
+  install_deps
 
-  echo "Bazel version:"
-  "$BAZEL" version
-
-  echo "Running Bazel-mediated build..."
-  OPAM_SWITCH="$SWITCH" "$BAZEL" run //tools:build
+  echo
+  echo "Bootstrap complete."
+  echo
+  echo "To enable repo-local bazel in this shell, run:"
+  echo
+  echo "  source ./env.sh"
+  echo
+  echo "Then:"
+  echo
+  echo "  bazel run //tools:build"
+  echo "  bazel run //tools:test"
 }
 
 main "$@"
