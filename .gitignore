@@ -12,3 +12,7 @@ _build/
 *.swp
 *~
 .DS_Store
+
+*.exe
+*.bc
+CLAUDE.md
