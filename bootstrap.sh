@@ -249,10 +249,11 @@ write_optional_bazelrc() {
   fi
 
   cat > "$ROOT/.bazelrc" <<EOF
-# Keep Bazel output/cache metadata out of the source tree where possible.
-# Wrapper targets still call Dune/opam through the host environment.
-
 common --announce_rc
+
+# Prevent Bazel convenience symlinks from appearing in the repo root.
+# Dune may traverse bazel-* symlinks and think the project is duplicated.
+build --symlink_prefix=/
 EOF
 
   echo "Wrote .bazelrc"

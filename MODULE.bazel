@@ -2,3 +2,5 @@ module(
     name = "eth_mac_of_hardcaml",
     version = "0.0.1a",
 )
+
+bazel_dep(name = "rules_shell", version = "0.3.0")
