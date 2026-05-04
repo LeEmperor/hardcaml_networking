@@ -47,7 +47,7 @@ module O = struct
     payload_sel : 'a;
 
     (* misc *)
-    payload_out_valid : 'a;
+    emit_payload : 'a;
 
     (* debug lines *)
     keep : 'a;
@@ -107,18 +107,24 @@ let create
   let src_mac_reg_en    = reg ~enable:vdd ~width:1 rising_edge in
   let eth_type_reg_en   = reg ~enable:vdd ~width:1 rising_edge in
   (* let payload_out_valid = reg ~enable:vdd ~width:1 rising_edge in *)
-  let payload_out_valid = Always.Variable.wire ~default:gnd () in
+  let payload_out_valid = Always.Variable.wire ~default:(Signal.zero 1) () in
 
   let dbg_mac_byte_count = mac_byte_count.value -- "dbg_mac_byte_count" in
   let dbg_dst_mac_reg_en = dst_mac_reg_en.value -- "dbg_dst_mac_reg_en" in
   let dbg_src_mac_reg_en = src_mac_reg_en.value -- "dbg_dst_src_reg_en" in
-  let dbg_state_vec      = sm.current           -- "dbg_state" in
+  (* let dbg_state_vec      = sm.current           -- "dbg_state" in *)
+  (* let bruh = (Always.Variable.wire ~default:gnd ()).value in *)
+  let bruh = Always.Variable.wire ~default:(Signal.zero 3) () in
+  let bruh2 = bruh.value -- "state vec" in
+
+  let bruh3 = (Always.Variable.wire ~default:(Signal.zero 3) ()).value in
 
   let keep = reduce ~f:(|:) (
     (bits_lsb dbg_mac_byte_count) @ 
     (bits_lsb dbg_dst_mac_reg_en) @
     (bits_lsb dbg_src_mac_reg_en) @
-    (bits_lsb dbg_state_vec)
+    (* (bits_lsb dbg_state_vec) @ *)
+    (bits_lsb bruh2)
   ) in
 
   (* let (<--) r i = r := Bits.of_int_trunc ~width:(Bits.width !r) i in *)
@@ -131,6 +137,11 @@ let create
     eth_type_reg_en <--. 0;
     payload_out_valid <--. 0;
     payload_sel <--. 0;
+
+    (* bruh <-- sm.current; *)
+    (* bruh <-- (Bits.to_int_trunc sm.current); *)
+    bruh <-- sm.current;
+    (* bruh3  <-- to_int_trunc sm.current; *)
 
     (* moore assigments *)
     sm.switch ~default:[] [
@@ -246,8 +257,7 @@ let create
     eth_type_reg_en       = eth_type_reg_en.value;
 
     payload_sel           = payload_sel.value;
-
-    payload_out_valid     = payload_out_valid.value;
+    emit_payload          = payload_out_valid.value;
 
     keep = keep;
   }

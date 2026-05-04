@@ -109,16 +109,23 @@ let () =
   send_bytes "dst_mac"  6  0x71_72_73_74_75_76;
   send_bytes "src_mac"  6  0x66_65_64_63_62_61;
   send_bytes "eth type" 2  0x67_65;
-  (* send_bytes "payload"  10 0x12_34_56_78_90; *)
-  (* send_byte 0x12; *)
-  (* send_byte 0x34; *)
-  (* send_byte 0x56; *)
-  (* send_byte 0x78; *)
 
-  send_bytes "payload" 4 0x12_34_56_78;
+  (* for i = 0 to 20 do *)
+  (*   send_bytes "payload burst" 4 i; *)
+  (* done; *)
+
+  send_bytes "payload burst 1" 3 0x12_43_56;
+  send_bytes "payload burst 2" 2 0x78_90;
+  send_bytes "payload burst 3" 4 0xDE_AD_BE_EF;
 
   t_in <-- 0;
 
+  cycle();
+  cycle();
+  cycle();
+  cycle();
+
+  cycle();
   cycle();
   cycle();
 

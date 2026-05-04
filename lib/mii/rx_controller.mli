@@ -35,7 +35,7 @@ module O : sig
     eth_type_reg_en : 'a;
 
     payload_sel : 'a;
-    payload_out_valid : 'a;
+    emit_payload : 'a;
 
     (* debug lines *)
     keep : 'a;

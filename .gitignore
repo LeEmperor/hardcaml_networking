@@ -26,3 +26,4 @@ _opam/
 env.sh
 .bazelrc
 MODULE.bazel.lock
+*.vcd
