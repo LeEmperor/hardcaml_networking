@@ -47,7 +47,8 @@ module O = struct
     payload_sel : 'a;
 
     (* misc *)
-    emit_payload : 'a;
+    emit_payload  : 'a;
+    crc_present   : 'a;
 
     (* debug lines *)
     keep : 'a;
@@ -112,19 +113,28 @@ let create
   let dbg_mac_byte_count = mac_byte_count.value -- "dbg_mac_byte_count" in
   let dbg_dst_mac_reg_en = dst_mac_reg_en.value -- "dbg_dst_mac_reg_en" in
   let dbg_src_mac_reg_en = src_mac_reg_en.value -- "dbg_dst_src_reg_en" in
-  (* let dbg_state_vec      = sm.current           -- "dbg_state" in *)
-  (* let bruh = (Always.Variable.wire ~default:gnd ()).value in *)
-  let bruh = Always.Variable.wire ~default:(Signal.zero 3) () in
-  let bruh2 = bruh.value -- "state vec" in
+  let _state_vec = Always.Variable.wire ~default:(Signal.zero 3) () in
+  let dbg_state_vec = _state_vec.value -- "state vec" in
+  let dbg_emit_payload = payload_out_valid.value -- "(dbg) emit payload (controller)" in
 
+  (* highkey lost what this does *)
   let bruh3 = (Always.Variable.wire ~default:(Signal.zero 3) ()).value in
 
+  (* falling edge detect on dv for the crc_valid strobe line *)
+  (* let crc_valid = Signal.reg ~enable:vdd (not_rx_dv &: crc_valid_prev) in *)
+  (* let crc_valid_prev = Signal.reg ~enable:vdd crc_valid in *)
+
+  let prev_dv = Signal.reg  ~enable:vdd rising_edge rx_dv in
+  let crc_valid = (rx_dv) &: (~:prev_dv) -- "(dbg) crc_valid (controller)" in
+
+  (* i swear this can be automated *)
   let keep = reduce ~f:(|:) (
     (bits_lsb dbg_mac_byte_count) @ 
     (bits_lsb dbg_dst_mac_reg_en) @
     (bits_lsb dbg_src_mac_reg_en) @
-    (* (bits_lsb dbg_state_vec) @ *)
-    (bits_lsb bruh2)
+    (bits_lsb dbg_state_vec) @
+    (bits_lsb dbg_emit_payload) @
+    (bits_lsb crc_valid)
   ) in
 
   (* let (<--) r i = r := Bits.of_int_trunc ~width:(Bits.width !r) i in *)
@@ -140,7 +150,7 @@ let create
 
     (* bruh <-- sm.current; *)
     (* bruh <-- (Bits.to_int_trunc sm.current); *)
-    bruh <-- sm.current;
+    _state_vec <-- sm.current;
     (* bruh3  <-- to_int_trunc sm.current; *)
 
     (* moore assigments *)
@@ -258,6 +268,7 @@ let create
 
     payload_sel           = payload_sel.value;
     emit_payload          = payload_out_valid.value;
+    crc_present           = gnd;
 
     keep = keep;
   }
