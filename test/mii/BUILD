@@ -13,3 +13,4 @@ sh_binary(
     args = ["waves_top.vcd"],
     visibility = ["//visibility:public"],
 )
+

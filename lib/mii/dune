@@ -1,6 +1,6 @@
 (library
  (name mii_of_hardcaml)
- (libraries core hardcaml)
+ (libraries core hardcaml helper_circuits)
  (preprocess
   (pps ppx_hardcaml ppx_jane))
  (flags (:standard -w -27-57-33-34-35-40-63-47-26))

@@ -140,7 +140,7 @@ let create
     m_axis_tlast  = Signal.gnd;
     m_axis_tkeep  = Signal.gnd;
 
-    keep = keep;
+    keep = Signal.zero 1;
   }
 
 

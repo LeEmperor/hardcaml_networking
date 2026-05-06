@@ -3,6 +3,7 @@ load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 exports_files(
     [
         "dune_dir.sh",
+        "dune_exec.sh",
         "dune_tb.sh",
         "open_wave.sh",
     ],

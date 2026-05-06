@@ -64,7 +64,7 @@ let create
   let src_mac_reg_en = i.I.src_mac_reg_en in
   let eth_type_reg_en = i.I.eth_type_reg_en in
   let emit_payload = i.I.emit_payload in
-  let fcs_present = i.I.fcs_present -- "(dbg,datapath) fcs_present" in
+  let fcs_present = i.I.fcs_present -- "dbg_datapath_fcs_present" in
   let rising_edge = Reg_spec.create ~clock:clk ~clear:rst () in
 
   (* let fcs_pipeline =  *)
@@ -102,25 +102,25 @@ let create
 
   (* pipeline - TODO: use hardcaml_circuits STAGES module later *)
   let reg_en        = Signal.reg rising_edge ~enable:raw_byte_out_valid in
-  let fcs_b0        = reg_en raw_byte_out   -- "(dbg) stage 1 val" in
-  let fcs_b1        = reg_en fcs_b0         -- "(dbg) stage 2" in
-  let fcs_b2        = reg_en fcs_b1         -- "(dbg) stage 3" in
-  let fcs_b3        = reg_en fcs_b2         -- "(dbg) stage 4" in
-  let fcs_valid_b0  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) emit_payload -- "valid stage1" in
-  let fcs_valid_b1  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) fcs_valid_b0 -- "valid stage2" in
-  let fcs_valid_b2  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) fcs_valid_b1 -- "valid stage3" in
-  let fcs_valid_b3  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) fcs_valid_b2 -- "valid stage4" in
+  let fcs_b0        = reg_en raw_byte_out   -- "dbg_stage1_val" in
+  let fcs_b1        = reg_en fcs_b0         -- "dbg_stage2" in
+  let fcs_b2        = reg_en fcs_b1         -- "dbg_stage3" in
+  let fcs_b3        = reg_en fcs_b2         -- "dbg_stage4" in
+  let fcs_valid_b0  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) emit_payload -- "valid_stage1" in
+  let fcs_valid_b1  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) fcs_valid_b0 -- "valid_stage2" in
+  let fcs_valid_b2  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) fcs_valid_b1 -- "valid_stage3" in
+  let fcs_valid_b3  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) fcs_valid_b2 -- "valid_stage4" in
   let delayed_byte  = fcs_b3 in
-  let delayed_valid = fcs_valid_b3 -- "dbg_delayed_valid (raw)" in
+  let delayed_valid = fcs_valid_b3 -- "dbg_delayed_valid_raw" in
 
   (* fcs result register -- 4 bytes wide *)
-  let reg_fcs_result  = ((fcs_b0) @: (fcs_b1) @: (fcs_b2) @: (fcs_b3)) -- "(dbg) crc 4 bytes" in
+  let reg_fcs_result  = ((fcs_b0) @: (fcs_b1) @: (fcs_b2) @: (fcs_b3)) -- "dbg_crc_4_bytes" in
 
   (* mux the payload out between 0 and the actual byte out *)
-  let wire_out      = mux payload_sel [zero 8; delayed_byte] -- "(dbg) payload_out (delayed)" in
+  let wire_out      = mux payload_sel [zero 8; delayed_byte] -- "dbg_payload_out_delayed" in
 
   (* payload is valid when the controller says it is, but AND'd with the delayed valid, therefore we shouldn't see FCS emitted as valid *)
-  let payload_out_valid = (emit_payload &: delayed_valid) -- "(dbg) payload_out_valid (delayed)" in
+  let payload_out_valid = (emit_payload &: delayed_valid) -- "dbg_payload_out_valid_delayed" in
 
   (* behavioural register instantiations *)
   compile [

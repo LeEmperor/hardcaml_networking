@@ -12,6 +12,7 @@ open Hardcaml
 open Signal
 open Always
 open Variable
+open Helper_circuits
 
 let () =
   Stdio.print_endline "=== Imported MAC RX Controller ==="
@@ -67,40 +68,6 @@ module States = struct
   [@@deriving sexp_of, compare ~localize, enumerate]
 end
 
-let _falling_edge_detector 
-  spec
-  x
-  =
-    let x_d = Signal.reg spec x in
-    (x_d) &: (~:x)
-;;
-
-let _rising_edge_detector 
-  spec
-  x
-  =
-    let x_d = Signal.reg spec x in
-    (~:x_d) &: (x)
-;;
-
-let delay_by spec ~n_cycles x =
-  let rec loop n acc =
-    if n = 0 then acc
-    else loop (n - 1) (Signal.reg spec acc)
-  in
-  loop n_cycles x
-;;
-
-let _falling_edge_delayed spec ~n_cycles x =
-  let fell = _falling_edge_detector spec x in
-  delay_by spec ~n_cycles fell
-;;
-
-let _rising_edge_delayed spec ~n_cycles x = 
-  let rose= _rising_edge_detector spec x in
-  delay_by spec ~n_cycles rose
-;;
-
 let create 
   (scope : Scope.t)
   (inputs) : (_ O.t)
@@ -147,15 +114,15 @@ let create
   let dbg_mac_byte_count = mac_byte_count.value -- "dbg_mac_byte_count" in
   let dbg_dst_mac_reg_en = dst_mac_reg_en.value -- "dbg_dst_mac_reg_en" in
   let dbg_src_mac_reg_en = src_mac_reg_en.value -- "dbg_dst_src_reg_en" in
-  let _state_vec = Always.Variable.wire ~default:(Signal.zero 3) () in
-  let dbg_state_vec = _state_vec.value -- "state vec" in
-  let dbg_emit_payload = payload_out_valid.value -- "(dbg) emit payload (controller)" in
+  let state_vec = Always.Variable.wire ~default:(Signal.zero 3) () in
+  let dbg_state_vec = state_vec.value -- "state_vec" in
+  let dbg_emit_payload = payload_out_valid.value -- "dbg_emit_payload_controller" in
 
   (* highkey lost what this does *)
   let bruh3 = (Always.Variable.wire ~default:(Signal.zero 3) ()).value in
 
   (* rising edge detect on dv for the crc_valid strobe line *)
-  let fcs_present = (_rising_edge_delayed rising_edge ~n_cycles:1 inputs.I.rx_dv) -- "(dbg) fcs present" in
+  let fcs_present = (rising_edge_delayed rising_edge ~n_cycles:1 inputs.I.rx_dv) -- "dbg_fcs_present" in
 
   (* i swear this can be automated *)
   let keep = reduce ~f:(|:) (
@@ -178,10 +145,7 @@ let create
     payload_out_valid <--. 0;
     payload_sel <--. 0;
 
-    (* bruh <-- sm.current; *)
-    (* bruh <-- (Bits.to_int_trunc sm.current); *)
-    _state_vec <-- sm.current;
-    (* bruh3  <-- to_int_trunc sm.current; *)
+    state_vec <-- sm.current;
 
     (* moore assigments *)
     sm.switch ~default:[] [
