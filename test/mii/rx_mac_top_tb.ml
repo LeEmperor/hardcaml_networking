@@ -74,7 +74,7 @@ let () =
     let lo = byte land 0xF in
     send hi lo;
 
-    printf "\n==Byte sent: == %X ==\n" byte;
+    (* printf "\n==Byte sent: == %X ==\n" byte; *)
     (* slice the byte in half, how do we do more advanced math with a hex value? *)
   in
 
@@ -84,8 +84,32 @@ let () =
     for i = 0 to (n_bytes - 1) do
       let send_target = (bytes lsr (8 * i)) land 0xFF in
       send_byte send_target;
-      printf "sending portion: %X" send_target;
+      (* printf "sending portion: %X" send_target; *)
     done;
+  in
+
+  let repeat_bytes name n_times bytes =
+    printf "\nsending %X: %d times " bytes n_times;
+    for i = 0 to n_times do
+      send_byte bytes;
+    done;
+  in
+
+  let send_frame 
+    (name: string)
+    ~(dst_mac:int)
+    ~(src_mac: int)
+    ~(eth_type: int)
+    ~(payload: int)
+    ~(payload_length: int)
+    = 
+      printf "\n sending frame: %s with %d bytes " name payload_length;
+      repeat_bytes  "preamble"              5 0x55;
+      send_bytes    "start-frame delimiter" 1 0xD5;
+      send_bytes    "dst_mac"               6 dst_mac;
+      send_bytes    "src_mac"               6 src_mac;
+      send_bytes    "eth_type"              2 eth_type;
+      send_bytes    "payload burst"   payload_length payload;
   in
 
   let idle () =
@@ -93,32 +117,36 @@ let () =
     cycle ();
   in
 
-  (* -- test 1: 0x55 for a while -> expect state=PREAMBLE -- *)
-  printf "\n[test 1] 0x55";
+  (* -- test 1: basic frame -- *)
+  printf "\n-- [test 1] basic frame --";
   reset ();
   t_rx_dv <-- 0;
 
   (* sit preamble *)
-  for i = 0 to 5 do
-    send_byte 0x55;
-  done;
+  (* for i = 0 to 5 do *)
+  (*   send_byte 0x55; *)
+  (* done; *)
+  (**)
+  (* (* SFD *) *)
+  (* send_byte 0xD5; *)
 
-  (* SFD *)
-  send_byte 0xD5;
+  (* send_bytes "dst_mac"  6  0x71_72_73_74_75_76; *)
+  (* send_bytes "src_mac"  6  0x66_65_64_63_62_61; *)
+  (* send_bytes "eth type" 2  0x67_65; *)
+  (**)
+  (* send_bytes "payload burst 1" 3 0x56_34_12; *)
+  (* send_bytes "payload burst 2" 2 0x89_67; *)
+  (* send_bytes "payload burst 3" 4 0xDE_AD_BE_EF; *) (* this should be crc?*)
 
-  send_bytes "dst_mac"  6  0x71_72_73_74_75_76;
-  send_bytes "src_mac"  6  0x66_65_64_63_62_61;
-  send_bytes "eth type" 2  0x67_65;
-  (* send_bytes "payload"  10 0x12_34_56_78_90; *)
-  send_byte 0x12;
-  send_byte 0x34;
-  send_byte 0x56;
-  send_byte 0x78;
+  send_frame 
+      "=== test frame 1 ===" 
+      ~dst_mac:0x36_12_73_36_24_85
+      ~src_mac:0x37_52_33_76_94_05
+      ~eth_type:0x45_21
+      ~payload_length:4
+      ~payload:0xDEADBEEF;
 
-  t_in <-- 0;
-
-  cycle();
-  cycle();
+  send_bytes "test CRC" 4 0xCA_FE_BA_BE;
 
   (* declare data in-valid from PHY line *)
   t_rx_dv <-- 1;

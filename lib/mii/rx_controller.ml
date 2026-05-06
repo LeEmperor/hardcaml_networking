@@ -12,6 +12,7 @@ open Hardcaml
 open Signal
 open Always
 open Variable
+open Helper_circuits
 
 let () =
   Stdio.print_endline "=== Imported MAC RX Controller ==="
@@ -47,7 +48,8 @@ module O = struct
     payload_sel : 'a;
 
     (* misc *)
-    payload_out_valid : 'a;
+    emit_payload  : 'a;
+    fcs_present   : 'a;
 
     (* debug lines *)
     keep : 'a;
@@ -107,18 +109,29 @@ let create
   let src_mac_reg_en    = reg ~enable:vdd ~width:1 rising_edge in
   let eth_type_reg_en   = reg ~enable:vdd ~width:1 rising_edge in
   (* let payload_out_valid = reg ~enable:vdd ~width:1 rising_edge in *)
-  let payload_out_valid = Always.Variable.wire ~default:gnd () in
+  let payload_out_valid = Always.Variable.wire ~default:(Signal.zero 1) () in
 
   let dbg_mac_byte_count = mac_byte_count.value -- "dbg_mac_byte_count" in
   let dbg_dst_mac_reg_en = dst_mac_reg_en.value -- "dbg_dst_mac_reg_en" in
   let dbg_src_mac_reg_en = src_mac_reg_en.value -- "dbg_dst_src_reg_en" in
-  let dbg_state_vec      = sm.current           -- "dbg_state" in
+  let state_vec = Always.Variable.wire ~default:(Signal.zero 3) () in
+  let dbg_state_vec = state_vec.value -- "state_vec" in
+  let dbg_emit_payload = payload_out_valid.value -- "dbg_emit_payload_controller" in
 
+  (* highkey lost what this does *)
+  let bruh3 = (Always.Variable.wire ~default:(Signal.zero 3) ()).value in
+
+  (* rising edge detect on dv for the crc_valid strobe line *)
+  let fcs_present = (rising_edge_delayed rising_edge ~n_cycles:1 inputs.I.rx_dv) -- "dbg_fcs_present" in
+
+  (* i swear this can be automated *)
   let keep = reduce ~f:(|:) (
     (bits_lsb dbg_mac_byte_count) @ 
     (bits_lsb dbg_dst_mac_reg_en) @
     (bits_lsb dbg_src_mac_reg_en) @
-    (bits_lsb dbg_state_vec)
+    (bits_lsb dbg_state_vec) @
+    (bits_lsb dbg_emit_payload) @
+    (bits_lsb fcs_present)
   ) in
 
   (* let (<--) r i = r := Bits.of_int_trunc ~width:(Bits.width !r) i in *)
@@ -131,6 +144,8 @@ let create
     eth_type_reg_en <--. 0;
     payload_out_valid <--. 0;
     payload_sel <--. 0;
+
+    state_vec <-- sm.current;
 
     (* moore assigments *)
     sm.switch ~default:[] [
@@ -246,8 +261,8 @@ let create
     eth_type_reg_en       = eth_type_reg_en.value;
 
     payload_sel           = payload_sel.value;
-
-    payload_out_valid     = payload_out_valid.value;
+    emit_payload          = payload_out_valid.value;
+    fcs_present           = fcs_present;
 
     keep = keep;
   }

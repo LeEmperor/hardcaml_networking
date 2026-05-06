@@ -34,8 +34,9 @@ module O : sig
     src_mac_reg_en  : 'a;
     eth_type_reg_en : 'a;
 
-    payload_sel : 'a;
-    payload_out_valid : 'a;
+    payload_sel   : 'a;
+    emit_payload  : 'a;
+    fcs_present   : 'a;
 
     (* debug lines *)
     keep : 'a;

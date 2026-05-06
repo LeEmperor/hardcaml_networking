@@ -77,6 +77,8 @@ let create
     let wire_dst_mac_reg_en     = Signal.wire 1 in
     let wire_src_mac_reg_en     = Signal.wire 1 in
     let wire_eth_type_reg_en    = Signal.wire 1 in
+    let wire_emit_payload       = Signal.wire 1 in
+    let wire_fcs_present        = Signal.wire 1 in
 
     let keep = Signal.wire 1 in
 
@@ -93,6 +95,8 @@ let create
         Rx_datapath.I.dst_mac_reg_en    = wire_dst_mac_reg_en;
         Rx_datapath.I.src_mac_reg_en    = wire_src_mac_reg_en;
         Rx_datapath.I.eth_type_reg_en   = wire_eth_type_reg_en;
+        Rx_datapath.I.emit_payload      = wire_emit_payload;
+        Rx_datapath.I.fcs_present       = wire_fcs_present; (* perhaps fcs can be moved to purely datapath item instead of needing to cross from the controller to the datapath *)
       }
     in
 
@@ -120,7 +124,8 @@ let create
   Signal.(wire_dst_mac_reg_en     <-- controller_inst.dst_mac_reg_en);
   Signal.(wire_src_mac_reg_en     <-- controller_inst.src_mac_reg_en);
   Signal.(wire_eth_type_reg_en    <-- controller_inst.eth_type_reg_en);
-
+  Signal.(wire_emit_payload       <-- controller_inst.emit_payload);
+  Signal.(wire_fcs_present        <-- controller_inst.fcs_present);
 
   (* can i map this to a function that lets me auto-bind the keep functionality? *)
   let keep = reduce ~f:(|:) (
@@ -131,11 +136,11 @@ let create
   {
     m_axis_tdata  = datapath_inst.payload_out;
     m_axis_tuser  = Signal.gnd;
-    m_axis_tvalid = Signal.gnd;
+    m_axis_tvalid = datapath_inst.payload_out_valid;
     m_axis_tlast  = Signal.gnd;
     m_axis_tkeep  = Signal.gnd;
 
-    keep = keep;
+    keep = Signal.zero 1;
   }
 
 
