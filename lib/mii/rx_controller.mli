@@ -36,7 +36,7 @@ module O : sig
 
     payload_sel   : 'a;
     emit_payload  : 'a;
-    crc_present   : 'a;
+    fcs_present   : 'a;
 
     (* debug lines *)
     keep : 'a;

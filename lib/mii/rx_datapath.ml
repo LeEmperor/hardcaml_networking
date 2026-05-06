@@ -24,6 +24,7 @@ module I = struct
     (* sels *)
     payload_sel : 'a;
     emit_payload : 'a;
+    fcs_present : 'a;
 
     (* branch input *)
     rx_data : 'a [@bits 4];
@@ -63,6 +64,7 @@ let create
   let src_mac_reg_en = i.I.src_mac_reg_en in
   let eth_type_reg_en = i.I.eth_type_reg_en in
   let emit_payload = i.I.emit_payload in
+  let fcs_present = i.I.fcs_present -- "(dbg,datapath) fcs_present" in
   let rising_edge = Reg_spec.create ~clock:clk ~clear:rst () in
 
   (* let fcs_pipeline =  *)
@@ -82,7 +84,6 @@ let create
       Rx_byte_assembler.I.rst     = rst;
     }
   in
-
 
   (* internal floating regs *)
   (* in theory this is another "assembler" thingy that I wrote with the nibble assembler, therefore I might be able to parameterize one for the word with in and the word with out, which should become an SRL or just MUXs in a Xilinx CLB *)
@@ -114,9 +115,6 @@ let create
 
   (* fcs result register -- 4 bytes wide *)
   let reg_fcs_result  = ((fcs_b0) @: (fcs_b1) @: (fcs_b2) @: (fcs_b3)) -- "(dbg) crc 4 bytes" in
-
-  (* let emit_payload_prev = Signal.reg rising_edge ~enable:vdd emit_payload -- "(dbg) emit_payload_prev" in *)
-  (* let wire_fcs_done = (~:emit_payload) &: (emit_payload_prev) -- "(dbg) fcs_done strobe" in (* strobe *) *)
 
   (* mux the payload out between 0 and the actual byte out *)
   let wire_out      = mux payload_sel [zero 8; delayed_byte] -- "(dbg) payload_out (delayed)" in
@@ -154,7 +152,8 @@ let create
     (bits_lsb src_addr) @ 
     (bits_lsb eth_type) @ 
     (bits_lsb wire_out) @
-    (bits_lsb reg_fcs_result)
+    (bits_lsb reg_fcs_result) @
+    (bits_lsb fcs_present)
   ) in
 
   {

@@ -48,7 +48,7 @@ module O = struct
 
     (* misc *)
     emit_payload  : 'a;
-    crc_present   : 'a;
+    fcs_present   : 'a;
 
     (* debug lines *)
     keep : 'a;
@@ -66,6 +66,40 @@ module States = struct
     | DONE 
   [@@deriving sexp_of, compare ~localize, enumerate]
 end
+
+let _falling_edge_detector 
+  spec
+  x
+  =
+    let x_d = Signal.reg spec x in
+    (x_d) &: (~:x)
+;;
+
+let _rising_edge_detector 
+  spec
+  x
+  =
+    let x_d = Signal.reg spec x in
+    (~:x_d) &: (x)
+;;
+
+let delay_by spec ~n_cycles x =
+  let rec loop n acc =
+    if n = 0 then acc
+    else loop (n - 1) (Signal.reg spec acc)
+  in
+  loop n_cycles x
+;;
+
+let _falling_edge_delayed spec ~n_cycles x =
+  let fell = _falling_edge_detector spec x in
+  delay_by spec ~n_cycles fell
+;;
+
+let _rising_edge_delayed spec ~n_cycles x = 
+  let rose= _rising_edge_detector spec x in
+  delay_by spec ~n_cycles rose
+;;
 
 let create 
   (scope : Scope.t)
@@ -120,12 +154,8 @@ let create
   (* highkey lost what this does *)
   let bruh3 = (Always.Variable.wire ~default:(Signal.zero 3) ()).value in
 
-  (* falling edge detect on dv for the crc_valid strobe line *)
-  (* let crc_valid = Signal.reg ~enable:vdd (not_rx_dv &: crc_valid_prev) in *)
-  (* let crc_valid_prev = Signal.reg ~enable:vdd crc_valid in *)
-
-  let prev_dv = Signal.reg  ~enable:vdd rising_edge rx_dv in
-  let crc_valid = (rx_dv) &: (~:prev_dv) -- "(dbg) crc_valid (controller)" in
+  (* rising edge detect on dv for the crc_valid strobe line *)
+  let fcs_present = (_rising_edge_delayed rising_edge ~n_cycles:1 inputs.I.rx_dv) -- "(dbg) fcs present" in
 
   (* i swear this can be automated *)
   let keep = reduce ~f:(|:) (
@@ -134,7 +164,7 @@ let create
     (bits_lsb dbg_src_mac_reg_en) @
     (bits_lsb dbg_state_vec) @
     (bits_lsb dbg_emit_payload) @
-    (bits_lsb crc_valid)
+    (bits_lsb fcs_present)
   ) in
 
   (* let (<--) r i = r := Bits.of_int_trunc ~width:(Bits.width !r) i in *)
@@ -268,7 +298,7 @@ let create
 
     payload_sel           = payload_sel.value;
     emit_payload          = payload_out_valid.value;
-    crc_present           = gnd;
+    fcs_present           = fcs_present;
 
     keep = keep;
   }
