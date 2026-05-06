@@ -20,3 +20,11 @@ sh_binary(
     args = ["waves/rx_mac_top_tb.vcd"],
     visibility = ["//visibility:public"],
 )
+
+sh_binary(
+    name = "wave_tx_uart_top_tb",
+    srcs = ["//tools/open_wave.sh"],
+    args = ["waves/bruh.vcd"],
+    visibility = ["//visibility:public"],
+)
+

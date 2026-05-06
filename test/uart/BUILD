@@ -1,17 +1,17 @@
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
-
-h_binary(
-    name = "rx_mac_top_tb",
+sh_binary(
+    name = "tx_uart_top_tb",
     srcs = ["//tools:dune_tb.sh"],
-    args = ["./test/mii/rx_mac_top_tb.exe"],
+    args = ["./test/uart/tx_uart_top_tb.exe"],
     visibility = ["//visibility:public"],
 )
 
 sh_binary(
-    name = "wave_rx_mac_top_tb",
+    name = "wave_tx_uart_top_tb",
     srcs = ["//tools:open_wave.sh"],
-    args = ["waves_top.vcd"],
+    args = ["waves_uart_top.vcd"],
     visibility = ["//visibility:public"],
 )
+
 

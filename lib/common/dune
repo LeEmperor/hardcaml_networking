@@ -2,7 +2,7 @@
  (modes byte exe)
  (names generate)
  (libraries core.command core_unix.command_unix core hardcaml
-   mii_of_hardcaml jane_rope)
+   mii_of_hardcaml uart_of_hardcaml jane_rope)
  (modules generate)
 
  (flags (:standard -w -27-57-33-34-35-40-63-47-26))
