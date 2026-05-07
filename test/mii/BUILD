@@ -1,7 +1,6 @@
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
-
-h_binary(
+sh_binary(
     name = "rx_mac_top_tb",
     srcs = ["//tools:dune_tb.sh"],
     args = ["./test/mii/rx_mac_top_tb.exe"],

@@ -1,9 +1,9 @@
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 sh_binary(
-    name = "tx_uart_top_tb",
+    name = "uart_tx_tb",
     srcs = ["//tools:dune_tb.sh"],
-    args = ["./test/uart/tx_uart_top_tb.exe"],
+    args = ["./test/uart/uart_tx_tb.exe"],
     visibility = ["//visibility:public"],
 )
 

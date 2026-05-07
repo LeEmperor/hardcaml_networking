@@ -111,7 +111,10 @@ let create
         ];
 
         START, [
-          sm.set_next PAYLOAD;
+          data_place_counter <--. 0;
+          when_ (i.I.tick) [
+            sm.set_next PAYLOAD;
+          ];
         ];
 
         PAYLOAD, [
@@ -132,7 +135,9 @@ let create
         ];
 
         STOP, [
-          sm.set_next IDLE;
+          when_ (i.I.tick) [
+            sm.set_next IDLE;
+          ];
         ];
       ];
     ];
