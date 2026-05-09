@@ -20,3 +20,11 @@ sh_binary(
     args = ["build", "lib/rgmii"],
     visibility = ["//visibility:public"],
 )
+
+sh_binary(
+  name = "uart",
+  srcs = ["//tools:dune_dir.sh"],
+  args = ["build", "lib/uart"],
+  visibility = ["//visibility:public"],
+)
+
