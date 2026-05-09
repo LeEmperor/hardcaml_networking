@@ -38,8 +38,9 @@ You will also want the following libraries for [OCaml](https://ocaml.org/)
 4. ```hardcaml_waveterm```
 5. ```alcotest```
 6. ```ocamlformat```
+7. ```hardcaml_circuits```
 
-Use ```opam install --switch=5.2.0+ox -y dune hardcaml ppx_hardcaml hardcaml_waveterm alcotest ocamlformat``` to install the set of dependencies manually, 
+Use ```opam install --switch=5.2.0+ox -y dune hardcaml ppx_hardcaml hardcaml_waveterm alcotest ocamlformat hardcaml_circuits``` to install the set of dependencies manually, 
 
 ```OR``` let the bootstrap ```--install-deps``` flag handle it for you. You can also opt to install the main OxCaml switch yourself, and then let the dependencies afterwards get handled by ```./bootstrap.sh```.
 
