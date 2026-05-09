@@ -2,6 +2,7 @@ open! Core
 open! Hardcaml
 open! Mii_of_hardcaml
 open! Hardcaml_waveterm
+open! Helper_tb_functions
 
 let () =
   print_endline "=== Running  MAC RX Top Testbench ===";;
@@ -36,6 +37,7 @@ let () =
   let t_in    = inputs.rx_data in
   let t_rx_dv = inputs.rx_dv in
   let t_rx_er = inputs.rx_er in
+  let t_tready = inputs.m_axis_tready in
 
   let t_out   = outputs.m_axis_tdata in
   let t_keep  = outputs.m_axis_tkeep in
@@ -48,68 +50,14 @@ let () =
     Cyclesim.cycle sim;
   in
 
-  (* assign helper *)
-  let (<--) r i = r := Bits.of_int_trunc ~width:(Bits.width !r) i in
-
   (* helpers *)
   let reset () =
+    t_tready <-- 0;
     t_en  <-- 0;
     t_rst <-- 1;
     cycle ();
     t_en <-- 1;
     t_rst <-- 0;
-  in
-
-  let send hi lo =
-    t_in <-- hi;
-    cycle ();
-    t_in <-- lo;
-    cycle ();
-  in
-
-  (* this sends in little-endian (computer order?) *)
-  (* for example 0x12_34 becomes 34 then 12, with an SRL getting 0x3412 across 2 cycles *)
-  let send_byte byte =
-    let hi = (byte lsr 4) land 0xF in
-    let lo = byte land 0xF in
-    send hi lo;
-
-    (* printf "\n==Byte sent: == %X ==\n" byte; *)
-    (* slice the byte in half, how do we do more advanced math with a hex value? *)
-  in
-
-  (* let send_bytes (name: string) (bytes: int) (n_bytes: int) =  *)
-  let send_bytes name n_bytes bytes = 
-    printf "\nsending %s: %d bytes : %X" name n_bytes bytes;
-    for i = 0 to (n_bytes - 1) do
-      let send_target = (bytes lsr (8 * i)) land 0xFF in
-      send_byte send_target;
-      (* printf "sending portion: %X" send_target; *)
-    done;
-  in
-
-  let repeat_bytes name n_times bytes =
-    printf "\nsending %X: %d times " bytes n_times;
-    for i = 0 to n_times do
-      send_byte bytes;
-    done;
-  in
-
-  let send_frame 
-    (name: string)
-    ~(dst_mac:int)
-    ~(src_mac: int)
-    ~(eth_type: int)
-    ~(payload: int)
-    ~(payload_length: int)
-    = 
-      printf "\n sending frame: %s with %d bytes " name payload_length;
-      repeat_bytes  "preamble"              5 0x55;
-      send_bytes    "start-frame delimiter" 1 0xD5;
-      send_bytes    "dst_mac"               6 dst_mac;
-      send_bytes    "src_mac"               6 src_mac;
-      send_bytes    "eth_type"              2 eth_type;
-      send_bytes    "payload burst"   payload_length payload;
   in
 
   let idle () =
@@ -121,41 +69,30 @@ let () =
   printf "\n-- [test 1] basic frame --";
   reset ();
   t_rx_dv <-- 0;
+  t_tready <-- 1;
 
-  (* sit preamble *)
-  (* for i = 0 to 5 do *)
-  (*   send_byte 0x55; *)
-  (* done; *)
-  (**)
-  (* (* SFD *) *)
-  (* send_byte 0xD5; *)
-
-  (* send_bytes "dst_mac"  6  0x71_72_73_74_75_76; *)
-  (* send_bytes "src_mac"  6  0x66_65_64_63_62_61; *)
-  (* send_bytes "eth type" 2  0x67_65; *)
-  (**)
-  (* send_bytes "payload burst 1" 3 0x56_34_12; *)
-  (* send_bytes "payload burst 2" 2 0x89_67; *)
-  (* send_bytes "payload burst 3" 4 0xDE_AD_BE_EF; *) (* this should be crc?*)
-
-  send_frame 
-      "=== test frame 1 ===" 
+  send_frame ~cycle ~t_in
+      "=== test frame 1 ==="
       ~dst_mac:0x36_12_73_36_24_85
       ~src_mac:0x37_52_33_76_94_05
       ~eth_type:0x45_21
-      ~payload_length:4
-      ~payload:0xDEADBEEF;
+      ~payload_length:5
+      ~payload:0x12_34_56_78_90;
 
-  send_bytes "test CRC" 4 0xCA_FE_BA_BE;
+  send_bytes ~cycle ~t_in "test CRC" 4 0xCA_FE_BA_BE;
 
   (* declare data in-valid from PHY line *)
   t_rx_dv <-- 1;
 
-  (* tail cycle *)
-  for i = 0 to 10 do
-    cycle();
+  (* drain: run for a few cycles and print any bytes that emerge *)
+  printf "\n-- rx bytes --";
+  for _ = 0 to 15 do
+    cycle ();
+    if Bits.to_bool !(outputs.m_axis_tvalid)
+    then printf "\n  %02X" (Bits.to_int_trunc !(outputs.m_axis_tdata))
   done;
-  idle();
+
+  idle ();
 
   print_endline "\n=== SIMULATION COMPLETE ===";
   )

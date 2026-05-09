@@ -51,6 +51,11 @@ module O = struct
     emit_payload  : 'a;
     fcs_present   : 'a;
 
+    (* FSM state indicators — 1 when currently in that state *)
+    in_preamble : 'a;
+    in_dst_mac  : 'a;
+    in_payload  : 'a;
+
     (* debug lines *)
     keep : 'a;
   } [@@deriving hardcaml]
@@ -92,12 +97,15 @@ let create
   let in_data       = inputs.I.rx_data in
   let en            = inputs.I.en in
   let valid         = inputs.I.rx_data_valid in
-  let stable        = ( (not_rx_dv |: rx_er) &: en) in
+  let stable        = (rx_dv &: not_rx_er &: en) in
 
   (* this would like to be a wire instead? essentially a mux *)
   (* let reg_payload_sel   = reg ~enable:vdd ~width:1 rising_edge in *)
   (* let payload_sel   = reg ~enable:vdd ~width:1 rising_edge in *)
   let payload_sel   = Always.Variable.wire ~default:gnd () in
+  let is_preamble   = Always.Variable.wire ~default:gnd () in
+  let is_dst_mac    = Always.Variable.wire ~default:gnd () in
+  let is_payload    = Always.Variable.wire ~default:gnd () in
 
   (* const params *)
   let const_0xD5 = of_int_trunc ~width:8 0xD5 in
@@ -149,7 +157,11 @@ let create
 
     (* moore assigments *)
     sm.switch ~default:[] [
+      PREAMBLE, [
+        is_preamble <--. 1;
+      ];
       DST_MAC, [
+        is_dst_mac <--. 1;
         dst_mac_reg_en <--. 1;
       ];
       SRC_MAC, [
@@ -159,6 +171,7 @@ let create
         eth_type_reg_en <--. 1;
       ];
       PAYLOAD, [
+        is_payload <--. 1;
         payload_sel <--. 1;
         payload_out_valid <--. 1;
       ];
@@ -237,11 +250,11 @@ let create
         if_ (rx_er) [
           sm.set_next IDLE;
         ] [
-          if_ (not_rx_dv) [
+          if_ (rx_dv) [
             (* keep taking payload *)
             sm.set_next PAYLOAD;
           ] [
-            (* payload finishsed *)
+            (* payload finished *)
             sm.set_next PREAMBLE;
           ];
         ];
@@ -253,7 +266,7 @@ let create
   ];  (* compile[] *)
 
   {
-    byte_assembler_en     = inputs.I.en; 
+    byte_assembler_en     = inputs.I.en &: inputs.I.rx_dv;
 
     (* byte assembler is how we branch, therefore it should be on when we are also on, with WE = controller*)
     dst_mac_reg_en        = dst_mac_reg_en.value;
@@ -263,6 +276,10 @@ let create
     payload_sel           = payload_sel.value;
     emit_payload          = payload_out_valid.value;
     fcs_present           = fcs_present;
+
+    in_preamble           = is_preamble.value;
+    in_dst_mac            = is_dst_mac.value;
+    in_payload            = is_payload.value;
 
     keep = keep;
   }
