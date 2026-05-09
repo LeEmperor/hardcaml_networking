@@ -58,7 +58,7 @@ let create
       );
 
   {
-    byte_out    = data_upper.value @: data_lower.value;
+    byte_out    = data_lower.value @: data_upper.value;
     byte_valid  = byte_valid.value;
   }
 

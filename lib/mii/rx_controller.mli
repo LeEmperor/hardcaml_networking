@@ -38,6 +38,11 @@ module O : sig
     emit_payload  : 'a;
     fcs_present   : 'a;
 
+    (* FSM state indicators *)
+    in_preamble : 'a;
+    in_dst_mac  : 'a;
+    in_payload  : 'a;
+
     (* debug lines *)
     keep : 'a;
   } [@@deriving hardcaml ]
