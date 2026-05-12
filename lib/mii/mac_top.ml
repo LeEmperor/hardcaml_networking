@@ -3,7 +3,7 @@ open! Hardcaml
 open! Signal
 
 let () =
-  Stdio.print_endline "=== Imported MAC RX Top ==="
+  Stdio.print_endline "=== Imported MAC Top ==="
 
 module Rx_word = struct
   type 'a t = {
@@ -48,6 +48,10 @@ module O = struct
     in_preamble : 'a;
     in_dst_mac  : 'a;
     in_payload  : 'a;
+
+    (* CRC result — sampled once per frame *)
+    frame_crc_ok : 'a;  (* holds last frame's CRC result; 1 = good *)
+    frame_done   : 'a;  (* 1-cycle pulse when a frame completes *)
 
     (* debug lines *)
     keep : 'a;
@@ -143,8 +147,46 @@ let create
   Signal.(wire_emit_payload       <-- controller_inst.emit_payload);
   Signal.(wire_fcs_present        <-- controller_inst.fcs_present);
 
+  let frame_end   = Helper_circuits.falling_edge_detector rising_edge inputs.I.rx_dv in
+  (* rx_dv drops before byte_valid fires for FCS[3] (the last byte).  Extend
+     crc_en through frame_end so the CRC processes that final byte and settles
+     at the residue on the cycle when we sample crc_valid for tuser. *)
+  let crc_en =
+    (~: (controller_inst.in_preamble)) &: (inputs.I.rx_dv |: frame_end) &: en
+  in
 
-  let rx_fifo = 
+  let crc_inst =
+    Rx_crc.create scope
+    { Rx_crc.I.clk           = clk;
+      rst                    = rst;
+      en                     = crc_en;
+      rx_data                = datapath_inst.raw_byte_out;
+      rx_data_valid          = datapath_inst.raw_byte_out_valid;
+    }
+  in
+
+  (* frame_end_d: frame_end delayed by 1 cycle.
+     B(F3) = the extra cycle after rx_dv drops (raw_byte_out_valid=1 for FCS[3]).
+     wr_enable_raw=1 at B(F3) → wr_valid_d=1 one cycle later (i=0 of drain phase).
+     frame_end fires at B(F3); frame_end_d fires at i=0, aligning with wr_valid_d. *)
+  let frame_end_d = Signal.reg rising_edge frame_end in
+  (* frame_end fires when rx_dv drops; crc_reg updates with FCS[3] at the clock
+     edge ending that cycle.  frame_end_d fires one cycle later when crc_valid
+     is already settled — that is the correct sample point. *)
+  let frame_ok    = Signal.reg rising_edge ~enable:frame_end_d crc_inst.crc_valid in
+
+  (* gate on raw_byte_out_valid: the datapath holds payload_out_valid high
+     between nibble pairs, so without this gate every byte would be written twice *)
+  let wr_enable_raw = datapath_inst.payload_out_valid &: datapath_inst.raw_byte_out_valid in
+  (* 1-cycle delay: crc_inst.crc_valid is combinatorial from crc_reg, which is updated
+     at the clock edge that processes FCS[3]. the delayed write lands on the following
+     cycle when crc_valid is already settled, so we can use it directly for tuser. *)
+  let wr_data_d  = Signal.reg rising_edge datapath_inst.payload_out in
+  let wr_valid_d = Signal.reg rising_edge wr_enable_raw in
+  (* tlast: frame_end_d (1-cycle-delayed falling edge) aligns with wr_valid_d for last byte *)
+  let tlast_wr   = frame_end_d &: wr_valid_d in
+
+  let rx_fifo =
     Rx_fifo.create
     ~cut_through:true
     ~capacity:128
@@ -152,13 +194,13 @@ let create
     {
       Rx_fifo.I.clock = clk;
       clear = rst;
-      wr_enable = datapath_inst.payload_out_valid;
+      wr_enable = wr_valid_d;
       wr_data =
         {
-          Rx_word.data = datapath_inst.payload_out;
-          last = Signal.gnd;
-          keep = Signal.vdd;
-          user = Signal.gnd
+          Rx_word.data = wr_data_d;
+          last         = tlast_wr;
+          keep         = Signal.vdd;
+          user         = mux2 tlast_wr (~: (crc_inst.crc_valid)) Signal.gnd;
         };
         rd_enable = inputs.m_axis_tready
     }
@@ -192,6 +234,8 @@ let create
     in_preamble   = controller_inst.in_preamble;
     in_dst_mac    = controller_inst.in_dst_mac;
     in_payload    = controller_inst.in_payload;
+    frame_crc_ok  = frame_ok;
+    frame_done    = Signal.reg rising_edge frame_end_d;
     keep = Signal.zero 1;
   }
 
