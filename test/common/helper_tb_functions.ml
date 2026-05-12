@@ -13,7 +13,8 @@ let send ~cycle ~(t_in : Bits.t ref) hi lo =
 let send_byte ~cycle ~t_in byte =
   let hi = (byte lsr 4) land 0xF in
   let lo = byte land 0xF in
-  send ~cycle ~t_in hi lo
+  (* MII transmits lo nibble first so the assembler (lo@:hi → byte) reconstructs correctly *)
+  send ~cycle ~t_in lo hi
 
 let send_bytes ~cycle ~t_in name n_bytes bytes =
   printf "\nsending %s: %d bytes : %X" name n_bytes bytes;
