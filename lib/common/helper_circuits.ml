@@ -4,13 +4,15 @@ open! Signal
 open! Always
 open! Variable
 
+(* TODO: how does this work? its a 1F && ~1F it appears? *)
+(* does this map to a reg as the output, or a wire combo'd of the prev value *)
 let falling_edge_detector 
   spec
   x
   =
     let x_d = Signal.reg spec x in
     (x_d) &: (~:x)
-;;
+;; (* on an edge, if the old value of the register is high, and the new value is low, then falling edge found *)
 
 let rising_edge_detector 
   spec

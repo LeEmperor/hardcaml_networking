@@ -17,6 +17,7 @@ let create_sim () =
   let inputs  : _ Rx_crc.I.t = Cyclesim.inputs sim in
   let outputs : _ Rx_crc.O.t = Cyclesim.outputs sim in
   (sim, waves, inputs, outputs)
+;;
 
 (* software reference CRC-32 to cross-check the hardware *)
 let sw_crc_bit crc bit =
