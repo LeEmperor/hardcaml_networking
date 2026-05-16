@@ -78,12 +78,16 @@ let create
   (* const *)
   (* could I make a reusable function for the mapping? *)
   (* aka byte_const_map that calls map for a specified width and returns the Signal.t list *)
-  let dst_mac_addr = List.map ~f:(of_int_trunc ~width:8) 
+  let const_dst_mac_addr = List.map ~f:(of_int_trunc ~width:8) 
     [0x12; 0x34; 0x56; 0x78; 0x90;] 
   in
 
-  let src_mac_addr = List.map ~f:(of_int_trunc ~width:8) 
+  let const_src_mac_addr = List.map ~f:(of_int_trunc ~width:8) 
     [0x90; 0x78; 0x56; 0x34; 0x12;] 
+  in
+
+  let const_eth_type = List.map ~f:(of_int_trunc ~width:8)
+    [0x12; 0x34;]
   in
   
   (* tagging + register creation *)
@@ -95,10 +99,15 @@ let create
   I_Wires.Of_always.apply_names ~prefix:"wire_" ~naming_op:(Scope.naming scope) i_wires;
 
   (* dst mac mux6 *)
-  let dst_mac_mux = mux mac_byte_sel dst_mac_addr in
+  let dst_mac_mux = mux mac_byte_sel const_dst_mac_addr in
 
   (* src mac mux6 *)
-  let src_mac_mux = mux mac_byte_sel src_mac_addr in
+  let src_mac_mux = mux mac_byte_sel const_src_mac_addr in
+
+  (* NOTE: there is this looes requirement that the information feeding the MUX has to be cycled upon each byte, therefore the chained mux that is used makes a slightly annoying net delay? 
+
+  one must also consider the fact that there must be ANOTHER counter to cycle the actual value mux (eg dst_mac_mux) -> perhaps we can use the counter from the controller somehow?
+  *)
 
   (* mux6 *)
   let byte_mux = mux byte_mux_sel [
@@ -111,6 +120,10 @@ let create
     of_int_trunc ~width:8 0x55;
     of_int_trunc ~width:8 0xD5;
   ] -- "mtag_byte_mux" in 
+
+  let byte_mux : Signal.t = 
+
+    |> Signal.mux i.I.byte_mux_sel
 
   {
     s_axis_tready = Signal.zero 1;
