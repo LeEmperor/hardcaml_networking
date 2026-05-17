@@ -120,7 +120,7 @@ let create
   ];
 
   {
-    ready         = i_wires.ready.value;
+    ready         = ~:(i_regs.high_sent.value);
     keep          = zero 1;
     tx_d          = i_wires.output_nibble.value;
     tx_en         = i_wires.nibble_valid.value;
