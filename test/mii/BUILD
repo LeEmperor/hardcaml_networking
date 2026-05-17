@@ -14,3 +14,10 @@ sh_binary(
     visibility = ["//visibility:public"],
 )
 
+sh_binary(
+    name = "tx_byte_disassembler_tb",
+    srcs = ["//tools:dune_tb.sh"],
+    args = ["./test/mii/tx_byte_disassembler_tb.exe"],
+    visibility = ["//visibility:public"],
+)
+

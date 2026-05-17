@@ -1,3 +1,11 @@
+(*
+  Bohdan Purtell
+  University of Florida
+
+  Module: Mac_top
+  Toplevel of the MII MAC. 
+*)
+
 open! Core
 open! Hardcaml
 open! Signal
@@ -16,6 +24,14 @@ end
 
 module Rx_fifo = Hardcaml_circuits.Fast_fifo.Make (Rx_word)
 
+module Tx_word = struct
+  type 'a t = {
+    data : 'a [@bits 8];
+  } [@@deriving hardcaml]
+end
+
+module Tx_fifo = Hardcaml_circuits.Fast_fifo.Make (Tx_word)
+
 module I = struct
   type 'a t = {
     (* spec *)
@@ -31,6 +47,12 @@ module I = struct
     (* axis exposed out signals *)
     (* Logic -> PHY *)
     m_axis_tready : 'a;
+
+    (* TX AXI-Stream input *)
+    s_axis_tdata  : 'a [@bits 8];
+    s_axis_tvalid : 'a;
+    s_axis_tuser  : 'a;
+    tx_start      : 'a;
   } [@@deriving hardcaml]
 end
 
@@ -53,21 +75,16 @@ module O = struct
     frame_crc_ok : 'a;  (* holds last frame's CRC result; 1 = good *)
     frame_done   : 'a;  (* 1-cycle pulse when a frame completes *)
 
+    (* TX MII output *)
+    tx_d  : 'a [@bits 4];
+    tx_en : 'a;
+
+    (* TX AXI-Stream backpressure *)
+    s_axis_tready : 'a;
+
     (* debug lines *)
     keep : 'a;
   } [@@deriving hardcaml]
-end
-
-module States = struct
-  type t =
-    | IDLE
-    | PREAMBLE
-    | DST_MAC
-    | SRC_MAC
-    | ETH_TYPE
-    | PAYLOAD
-    | DONE 
-  [@@deriving sexp_of, compare ~localize, enumerate]
 end
 
 let create 
@@ -206,13 +223,89 @@ let create
     }
   in
 
+  (* TX payload FIFO: AXI-S writes in, controller reads out during Payload state.
+     wire_tx_fifo_rd_en and wire_dis_ready break instantiation-order dependencies. *)
+  let wire_tx_fifo_rd_en = Signal.wire 1 in
+  let wire_dis_ready     = Signal.wire 1 in
+  let wire_fcs_byte      = Signal.wire 8 in
+
+  let tx_fifo =
+    Tx_fifo.create
+    ~cut_through:true
+    ~capacity:128
+    scope
+    { Tx_fifo.I.clock     = clk;
+      clear               = rst;
+      wr_enable           = inputs.I.s_axis_tvalid;
+      wr_data             = { Tx_word.data = inputs.I.s_axis_tdata };
+      rd_enable           = wire_tx_fifo_rd_en;
+    }
+  in
+
+  let tx_ctrl =
+    Tx_controller.create scope
+    { Tx_controller.I.clk        = clk;
+      rst                         = rst;
+      en                          = en;
+      start                       = inputs.I.tx_start;
+      fifo_empty                  = ~:(tx_fifo.rd_valid);
+      dis_ready                   = wire_dis_ready;
+    }
+  in
+
+  (* Pop FIFO and advance controller only when the serializer can accept the next byte *)
+  Signal.(wire_tx_fifo_rd_en <-- (tx_ctrl.state ==:. 6 &: wire_dis_ready));
+
+  let tx_dp =
+    Tx_datapath.create scope
+    { Tx_datapath.I.clk           = clk;
+      rst                          = rst;
+      en                           = en;
+      s_axis_tdata                 = tx_fifo.rd_data.data;
+      s_axis_tvalid                = tx_fifo.rd_valid;
+      s_axis_tuser                 = inputs.I.s_axis_tuser;
+      fcs_byte                     = wire_fcs_byte;
+      byte_mux_sel                 = tx_ctrl.byte_mux_sel;
+      mac_byte_sel                 = tx_ctrl.mac_byte_sel;
+    }
+  in
+
+  let tx_ser =
+    Tx_byte_disassembler.create scope
+    { Tx_byte_disassembler.I.clk          = clk;
+      rst                                  = rst;
+      en                                   = en;
+      byte_in                              = tx_dp.byte_out;
+      byte_in_valid                        = ~:(tx_ctrl.state ==:. 0);
+    }
+  in
+
+  Signal.(wire_dis_ready <-- tx_ser.ready);
+
+  (* CRC accumulates dst_mac/src_mac/eth_type/payload (states 3-6), gated on
+     dis_ready so each byte is counted exactly once.  en=0 in Idle resets the
+     accumulator between frames.  byte_sel drives the FCS byte mux in Fcs state. *)
+  let crc_active = (tx_ctrl.state >=:. 3) &: (tx_ctrl.state <=:. 6) in
+  let tx_crc_inst =
+    Tx_crc.create scope
+    { Tx_crc.I.clk        = clk;
+      rst                  = rst;
+      en                   = ~:(tx_ctrl.state ==:. 0);
+      data                 = tx_dp.byte_out;
+      data_valid           = wire_dis_ready &: crc_active;
+      byte_sel             = Signal.select tx_ctrl.mac_byte_sel ~high:1 ~low:0;
+    }
+  in
+
+  Signal.(wire_fcs_byte <-- tx_crc_inst.fcs_byte);
+
   (* can i map this to a function that lets me auto-bind the keep functionality? *)
   let keep = reduce ~f:(|:) (
-      (bits_lsb datapath_inst.keep) @ 
+      (bits_lsb datapath_inst.keep) @
       (bits_lsb controller_inst.keep)
   ) in
 
-  (* old non-fifo interface *)
+  (* old non-fifo interface -> use param to emulate generate block *)
   (* { *)
   (*   m_axis_tdata  = datapath_inst.payload_out; *)
   (*   m_axis_tuser  = Signal.gnd; *)
@@ -223,7 +316,6 @@ let create
   (*   keep = Signal.zero 1; *)
   (* } *)
   (**)
-
 
   {
     m_axis_tdata  = rx_fifo.rd_data.data;
@@ -236,6 +328,9 @@ let create
     in_payload    = controller_inst.in_payload;
     frame_crc_ok  = frame_ok;
     frame_done    = Signal.reg rising_edge frame_end_d;
-    keep = Signal.zero 1;
+    tx_d          = tx_ser.tx_d;
+    tx_en         = tx_ser.tx_en;
+    s_axis_tready = ~:(tx_fifo.full);
+    keep          = keep;
   }
 
