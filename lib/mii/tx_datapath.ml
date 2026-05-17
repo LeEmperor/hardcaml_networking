@@ -53,14 +53,18 @@ let create
   let _en          = i.I.en in
   let mac_byte_sel = i.I.mac_byte_sel in
 
+  (* dst: broadcast so the laptop accepts it on whichever port is cabled to the Arty *)
   let const_dst_mac = List.map ~f:(of_int_trunc ~width:8)
-    [0x12; 0x34; 0x56; 0x78; 0x90; 0xAB]
+    [0xFF; 0xFF; 0xFF; 0xFF; 0xFF; 0xFF]
   in
+  (* src: locally-administered MAC for the Arty (02:xx = not a burned-in OUI) *)
   let const_src_mac = List.map ~f:(of_int_trunc ~width:8)
-    [0xAB; 0x90; 0x78; 0x56; 0x34; 0x12]
+    [0x02; 0x00; 0x00; 0x00; 0x00; 0x01]
   in
+  (* ethertype 0x9999: custom/unknown — kernel ignores payload, easy to sniff with
+     tcpdump -i <iface> ether proto 0x9999 *)
   let const_eth_type = List.map ~f:(of_int_trunc ~width:8)
-    [0x08; 0x00]
+    [0x99; 0x99]
   in
 
   let dst_mac_mux  = mux mac_byte_sel const_dst_mac in

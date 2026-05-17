@@ -152,11 +152,11 @@ let create
         ];
       ];
 
-      (* by now: 7 + 6 + 6 + 2 = 21 bytes overhead *)
-      (* minimum frame 64 - 4 (fcs) = 60; 60 - 21 = 39 payload bytes minimum *)
+      (* minimum frame 64 bytes (incl FCS, excl preamble/SFD)
+         header: 6+6+2 = 14, FCS: 4 → minimum payload: 64-14-4 = 46 bytes *)
       Payload, [
         when_ (~:fifo_empty &: dis_ready) [
-          if_ (i_regs.byte_counter.value ==:. 37) [
+          if_ (i_regs.byte_counter.value ==:. 45) [
             rst_counter;
             i_wires.crc_en <--. 1;
             sm.set_next Fcs;
