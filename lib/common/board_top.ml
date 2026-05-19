@@ -34,6 +34,7 @@ module I = struct
   type 'a t = {
     (* Clock *)
     clk100mhz    : 'a;           (* E3  100 MHz system clock *)
+    (* this is the main system clk *)
 
     (* Slide switches *)
     sw           : 'a [@bits 4]; (* A8 C11 C10 A10 *)
@@ -47,11 +48,12 @@ module I = struct
     (* Ethernet PHY — MII RX + shared *)
     eth_col      : 'a;           (* D17 collision detect  *)
     eth_crs      : 'a;           (* G14 carrier sense     *)
-    eth_rx_clk   : 'a;           (* F15 RX clock from PHY *)
     eth_rx_dv    : 'a;           (* G16 RX data valid     *)
     eth_rxd      : 'a [@bits 4]; (* D18 E17 E18 G17       *)
     eth_rxerr    : 'a;           (* C17 RX error          *)
+
     eth_tx_clk   : 'a;           (* H16 TX clock from PHY *)
+    eth_rx_clk   : 'a;           (* F15 RX clock from PHY *)
   } [@@deriving hardcaml]
 end
 
@@ -95,3 +97,4 @@ let create (_scope : Scope.t) (_i : _ I.t) : _ O.t =
     eth_txd      = zero 4;
   }
 ;;
+

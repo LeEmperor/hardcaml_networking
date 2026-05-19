@@ -323,6 +323,7 @@ let create
     m_axis_tlast  = rx_fifo.rd_data.last;
     m_axis_tkeep  = rx_fifo.rd_data.keep;
     m_axis_tuser  = rx_fifo.rd_data.user;
+
     in_preamble   = controller_inst.in_preamble;
     in_dst_mac    = controller_inst.in_dst_mac;
     in_payload    = controller_inst.in_payload;
