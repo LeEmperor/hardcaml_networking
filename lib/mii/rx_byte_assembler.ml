@@ -9,8 +9,8 @@ let () =
 
 module I = struct
   type 'a t = {
-    clk       : 'a;
-    rst       : 'a;
+    clock       : 'a;
+    reset       : 'a;
     rx_data   : 'a [@bits 4];
     en        : 'a;
   } [@@deriving hardcaml]
@@ -28,11 +28,12 @@ let create
     (* port aliases *)
     let rx_data = inputs.I.rx_data in
     let en      = inputs.I.en in
-    let clk     = inputs.I.clk in
-    let rst     = inputs.I.rst in
+    let clock   = inputs.I.clock in
+    let reset   = inputs.I.reset in
+    let clear   = reset in
 
     (* reg spec *)
-    let spec : Reg_spec.t = Reg_spec.create ~clock:clk ~clear:rst () in
+    let spec : Reg_spec.t = Reg_spec.create ~clock ~clear () in
 
     (* internal wires *)
     let byte_valid = reg ~enable:vdd ~width:1 spec in

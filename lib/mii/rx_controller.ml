@@ -20,8 +20,8 @@ let () =
 module I = struct
   type 'a t = {
     (* spec *)
-    clk : 'a;
-    rst : 'a;
+    clock : 'a;
+    reset : 'a;
     en  : 'a;
 
     (* control lines  *)
@@ -81,7 +81,7 @@ let create
   let open Variable in
 
   let rising_edge : Reg_spec.t = 
-    Reg_spec.create ~clock:inputs.I.clk ~clear:inputs.I.rst ()
+    Reg_spec.create ~clock:inputs.I.clock ~clear:inputs.I.reset ()
   in
 
   (* state machine *)

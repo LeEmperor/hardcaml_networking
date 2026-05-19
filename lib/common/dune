@@ -23,7 +23,7 @@
 (library
   (name helper_circuits)
   (wrapped false)
-  (libraries core hardcaml)
+  (libraries core hardcaml hardcaml_circuits)
   (modules helper_circuits board_top clk_div second_pulse)
   (flags (:standard -w -27-57-33-34-35-40-63-47-26))
 

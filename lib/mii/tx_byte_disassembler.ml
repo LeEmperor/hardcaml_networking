@@ -17,8 +17,8 @@ let () =
 module I = struct
   type 'a t = {
     (* spec *)
-    clk : 'a;
-    rst : 'a;
+    clock : 'a;
+    reset : 'a;
     en  : 'a;
 
     (* data lignes *)
@@ -71,12 +71,13 @@ let create
   let open Variable in
 
   (* port aliases - these resolve as Signal.t items *)   
-  let clk = i.I.clk in
-  let rst = i.I.rst in
+  let clock = i.I.clock in
+  let reset = i.I.reset in
+  let clear = i.I.reset in
   let en  = i.I.en in
   let byte_in = i.I.byte_in in
   let byte_in_valid = i.I.byte_in_valid in
-  let rising_edge = Reg_spec.create ~clock:clk ~clear:rst () in
+  let rising_edge = Reg_spec.create ~clock ~clear () in
   
   (* tagging + register creation *)
   let i_regs = I_Regs.Of_always.reg ~enable:vdd rising_edge in

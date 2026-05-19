@@ -35,7 +35,7 @@ let falling_edge_delayed spec ~n_cycles x =
   delay_by spec ~n_cycles fell
 ;;
 
-let rising_edge_delayed spec ~n_cycles x = 
+let rising_edge_delayed spec ~n_cycles x t = 
   let rose= rising_edge_detector spec x in
   delay_by spec ~n_cycles rose
 ;;
