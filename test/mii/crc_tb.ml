@@ -42,7 +42,7 @@ let () =
   Out_channel.with_file "waves_crc.vcd" ~f:(fun oc ->
   let sim = Vcd.wrap oc sim in
 
-  let t_rst   = inputs.rst in
+  let t_rst   = inputs.reset in
   let t_en    = inputs.en in
   let t_data  = inputs.rx_data in
   let t_valid = inputs.rx_data_valid in
