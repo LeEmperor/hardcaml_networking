@@ -19,8 +19,8 @@ let () =
 
 module I = struct
   type 'a t = {
-    clk : 'a;
-    rst : 'a;
+    clock : 'a;
+    reset : 'a;
     en  : 'a;
 
     start      : 'a;
@@ -65,15 +65,16 @@ let create
 
   let _scope : Scope.t = Scope.sub_scope scope "tx_controller_scope" in
 
-  let clk        = i.I.clk in
-  let rst        = i.I.rst in
+  let clock      = i.I.clock in
+  let reset      = i.I.reset in
+  let clear      = i.I.reset in
   let _en        = i.I.en in
   let start      = i.I.start in
   let fifo_empty = i.I.fifo_empty -- "fifo_empty" in
   let dis_ready  = i.I.dis_ready  -- "dis_ready"  in
 
   let rising_edge : Reg_spec.t =
-    Reg_spec.create ~clock:clk ~clear:rst ()
+    Reg_spec.create ~clock ~clear ()
   in
 
   let sm = State_machine.create (module States) ~enable:vdd rising_edge in
@@ -84,6 +85,7 @@ let create
   let i_wires = I_Wires.Of_always.wire Signal.zero in
   I_Wires.Of_always.apply_names ~prefix:"wire_" ~naming_op:(Scope.naming scope) i_wires;
 
+  (* local closure helper functions for counter handling *)
   let rst_counter    = i_regs.byte_counter <--. 0 in
   let increm_counter = i_regs.byte_counter <-- i_regs.byte_counter.value +:. 1 in
 

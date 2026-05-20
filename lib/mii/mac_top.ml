@@ -35,7 +35,7 @@ module Tx_fifo = Hardcaml_circuits.Fast_fifo.Make (Tx_word)
 module I = struct
   type 'a t = {
     (* spec *)
-    clock     : 'a; (* rx_clk *)
+    clock     : 'a; (* rx_clock *)
     reset     : 'a; (* rx rst *)
     en        : 'a;
 
@@ -95,14 +95,15 @@ let create
     let open Variable in
 
     (* port aliases *)
-    let clk  = inputs.I.clock in
-    let rst  = inputs.I.reset in
-    let en   = inputs.I.en in
-    let d_in = inputs.I.rx_data in
-    let d_out = Signal.wire 8 in
+    let clock  = inputs.I.clock in
+    let reset  = inputs.I.reset in
+    let clear  = reset in
+    let en     = inputs.I.en in
+    let d_in   = inputs.I.rx_data in
+    let d_out  = Signal.wire 8 in
 
     let rising_edge : Reg_spec.t = 
-      Reg_spec.create ~clock:clk ~clear:rst () 
+      Reg_spec.create ~clock ~clear () 
     in
 
     (* internal ties *)
@@ -125,8 +126,8 @@ let create
       {
         Rx_datapath.I.rx_data           = d_in;
         Rx_datapath.I.byte_assembler_en = wire_byte_assembler_en;
-        Rx_datapath.I.clk               = clk;
-        Rx_datapath.I.rst               = rst;
+        Rx_datapath.I.clock             = clock;
+        Rx_datapath.I.reset             = reset;
         Rx_datapath.I.en                = en;
         Rx_datapath.I.payload_sel       = wire_payload_sel;
         Rx_datapath.I.dst_mac_reg_en    = wire_dst_mac_reg_en;
@@ -141,14 +142,13 @@ let create
       Rx_controller.create 
         scope
       {
-        Rx_controller.I.clk = clk;
-        rst             = rst;
-        en              = en;
-        rx_dv           = inputs.I.rx_dv;
-        rx_er           = inputs.I.rx_er;
-        rx_data_valid   = wire_raw_byte_out_valid;
-        (* rx_data         = wire_byte_out; *)
-        rx_data         = datapath_inst.raw_byte_out;
+        Rx_controller.I.clock = clock;
+        Rx_controller.I.reset = reset;
+        Rx_controller.I.en             = en;
+        Rx_controller.I.rx_dv          = inputs.I.rx_dv;
+        Rx_controller.I.rx_er          = inputs.I.rx_er;
+        Rx_controller.I.rx_data_valid  = wire_raw_byte_out_valid;
+        Rx_controller.I.rx_data        = datapath_inst.raw_byte_out;
       }
     in
 
@@ -174,8 +174,8 @@ let create
 
   let crc_inst =
     Rx_crc.create scope
-    { Rx_crc.I.clk           = clk;
-      rst                    = rst;
+    { Rx_crc.I.clock         = clock;
+      reset                  = reset;
       en                     = crc_en;
       rx_data                = datapath_inst.raw_byte_out;
       rx_data_valid          = datapath_inst.raw_byte_out_valid;
@@ -209,8 +209,8 @@ let create
     ~capacity:128
     scope
     {
-      Rx_fifo.I.clock = clk;
-      clear = rst;
+      Rx_fifo.I.clock = clock;
+      clear = reset;
       wr_enable = wr_valid_d;
       wr_data =
         {
@@ -234,8 +234,8 @@ let create
     ~cut_through:true
     ~capacity:128
     scope
-    { Tx_fifo.I.clock     = clk;
-      clear               = rst;
+    { Tx_fifo.I.clock     = clock;
+      clear = reset;
       wr_enable           = inputs.I.s_axis_tvalid;
       wr_data             = { Tx_word.data = inputs.I.s_axis_tdata };
       rd_enable           = wire_tx_fifo_rd_en;
@@ -244,8 +244,8 @@ let create
 
   let tx_ctrl =
     Tx_controller.create scope
-    { Tx_controller.I.clk        = clk;
-      rst                         = rst;
+    { Tx_controller.I.clock        = clock;
+      reset                         = reset;
       en                          = en;
       start                       = inputs.I.tx_start;
       fifo_empty                  = ~:(tx_fifo.rd_valid);
@@ -258,8 +258,8 @@ let create
 
   let tx_dp =
     Tx_datapath.create scope
-    { Tx_datapath.I.clk           = clk;
-      rst                          = rst;
+    { Tx_datapath.I.clock          = clock;
+      reset = reset;
       en                           = en;
       s_axis_tdata                 = tx_fifo.rd_data.data;
       s_axis_tvalid                = tx_fifo.rd_valid;
@@ -272,8 +272,8 @@ let create
 
   let tx_ser =
     Tx_byte_disassembler.create scope
-    { Tx_byte_disassembler.I.clk          = clk;
-      rst                                  = rst;
+    { Tx_byte_disassembler.I.clock          = clock;
+      reset;
       en                                   = en;
       byte_in                              = tx_dp.byte_out;
       byte_in_valid                        = ~:(tx_ctrl.state ==:. 0);
@@ -288,8 +288,9 @@ let create
   let crc_active = (tx_ctrl.state >=:. 3) &: (tx_ctrl.state <=:. 6) in
   let tx_crc_inst =
     Tx_crc.create scope
-    { Tx_crc.I.clk        = clk;
-      rst                  = rst;
+    { 
+      Tx_crc.I.clock       = clock;
+      reset                  = reset;
       en                   = ~:(tx_ctrl.state ==:. 0);
       data                 = tx_dp.byte_out;
       data_valid           = wire_dis_ready &: crc_active;
@@ -323,6 +324,7 @@ let create
     m_axis_tlast  = rx_fifo.rd_data.last;
     m_axis_tkeep  = rx_fifo.rd_data.keep;
     m_axis_tuser  = rx_fifo.rd_data.user;
+
     in_preamble   = controller_inst.in_preamble;
     in_dst_mac    = controller_inst.in_dst_mac;
     in_payload    = controller_inst.in_payload;

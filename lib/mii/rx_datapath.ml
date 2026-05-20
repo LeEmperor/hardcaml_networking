@@ -11,8 +11,8 @@ let () =
 
 module I = struct
   type 'a t = {
-    clk : 'a;
-    rst : 'a;
+    clock : 'a;
+    reset : 'a;
     en  : 'a;
 
     (* reg ens *)
@@ -56,8 +56,9 @@ let create
   let _scope : Scope.t = Scope.sub_scope scope "rx_datapath_scope" in
 
   (* port aliases *) (* possible to make a function that auto makes the port aliases for me? *)
-  let clk = i.I.clk in
-  let rst = i.I.rst in
+  let clock = i.I.clock in
+  let reset = i.I.reset in
+  let clear = reset in
   let en = i.I.en in
   let payload_sel = i.I.payload_sel in
   let dst_mac_reg_en = i.I.dst_mac_reg_en in
@@ -65,7 +66,7 @@ let create
   let eth_type_reg_en = i.I.eth_type_reg_en in
   let emit_payload = i.I.emit_payload in
   let fcs_present = i.I.fcs_present -- "dbg_datapath_fcs_present" in
-  let rising_edge = Reg_spec.create ~clock:clk ~clear:rst () in
+  let rising_edge = Reg_spec.create ~clock ~clear () in
 
   (* let fcs_pipeline =  *)
   (*   Stages.pipeline_with_enable *)
@@ -78,10 +79,10 @@ let create
 
   let byte_assembler_inst =
     Rx_byte_assembler.create {
-      Rx_byte_assembler.I.rx_data = i.I.rx_data;
-      Rx_byte_assembler.I.en      = i.I.byte_assembler_en;
-      Rx_byte_assembler.I.clk     = clk;
-      Rx_byte_assembler.I.rst     = rst;
+      Rx_byte_assembler.I.rx_data   = i.I.rx_data;
+      Rx_byte_assembler.I.en        = i.I.byte_assembler_en;
+      Rx_byte_assembler.I.clock     = clock;
+      Rx_byte_assembler.I.reset     = reset;
     }
   in
 

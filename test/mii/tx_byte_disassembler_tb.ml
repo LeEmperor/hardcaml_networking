@@ -41,7 +41,7 @@ let () =
   let (<--) r i = r := Bits.of_int_trunc ~width:(Bits.width !r) i in
 
   (* signal aliases *)
-  let t_rst       = i.rst in
+  let t_rst       = i.reset in
   let t_en        = i.en in
   let t_in        = i.byte_in in
   let t_in_valid  = i.byte_in_valid in

@@ -20,8 +20,8 @@ let () =
 
 module I = struct
   type 'a t = {
-    clk        : 'a;
-    rst        : 'a;
+    clock        : 'a;
+    reset        : 'a;
     en         : 'a;          (* dropping resets the accumulator to 0xFFFFFFFF *)
     data       : 'a [@bits 8];
     data_valid : 'a;          (* accumulate data into CRC this cycle *)
@@ -51,19 +51,19 @@ let crc_byte current_crc input_byte =
 let create (scope : Scope.t) (i) : _ O.t =
   let _scope = Scope.sub_scope scope "tx_crc_scope" in
 
-  let clk        = i.I.clk in
-  let rst        = i.I.rst in
+  let clock        = i.I.clock in
+  let reset        = i.I.reset in
   let en         = i.I.en in
   let data       = i.I.data in
   let data_valid = i.I.data_valid in
   let byte_sel   = i.I.byte_sel in
 
-  let rising_edge = Reg_spec.create ~clock:clk () in
+  let rising_edge = Reg_spec.create ~clock () in
   let crc_init    = Signal.of_int_trunc ~width:32 0xFFFFFFFF in
   let crc_reg     = reg ~enable:vdd ~width:32 rising_edge in
 
   compile [
-    if_ (rst |: ~:en) [
+    if_ (reset |: ~:en) [
       crc_reg <-- crc_init;
     ] [
       when_ data_valid [
@@ -88,3 +88,4 @@ let create (scope : Scope.t) (i) : _ O.t =
     keep    = lsb (crc_reg.value);
   }
 ;;
+
