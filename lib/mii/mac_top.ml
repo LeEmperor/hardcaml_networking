@@ -143,13 +143,12 @@ let create
         scope
       {
         Rx_controller.I.clock = clock;
-        rst                   = rst;
-        en                    = en;
-        rx_dv                 = inputs.I.rx_dv;
-        rx_er                 = inputs.I.rx_er;
-        rx_data_valid         = wire_raw_byte_out_valid;
-        (* rx_data               = wire_byte_out; *)
-        rx_data               = datapath_inst.raw_byte_out;
+        Rx_controller.I.reset = reset;
+        Rx_controller.I.en             = en;
+        Rx_controller.I.rx_dv          = inputs.I.rx_dv;
+        Rx_controller.I.rx_er          = inputs.I.rx_er;
+        Rx_controller.I.rx_data_valid  = wire_raw_byte_out_valid;
+        Rx_controller.I.rx_data        = datapath_inst.raw_byte_out;
       }
     in
 
@@ -175,8 +174,8 @@ let create
 
   let crc_inst =
     Rx_crc.create scope
-    { Rx_crc.I.clock           = clock;
-      rst                    = rst;
+    { Rx_crc.I.clock         = clock;
+      reset                  = reset;
       en                     = crc_en;
       rx_data                = datapath_inst.raw_byte_out;
       rx_data_valid          = datapath_inst.raw_byte_out_valid;
@@ -211,7 +210,7 @@ let create
     scope
     {
       Rx_fifo.I.clock = clock;
-      clear = rst;
+      clear = reset;
       wr_enable = wr_valid_d;
       wr_data =
         {
@@ -236,7 +235,7 @@ let create
     ~capacity:128
     scope
     { Tx_fifo.I.clock     = clock;
-      clear               = rst;
+      clear = reset;
       wr_enable           = inputs.I.s_axis_tvalid;
       wr_data             = { Tx_word.data = inputs.I.s_axis_tdata };
       rd_enable           = wire_tx_fifo_rd_en;
@@ -246,7 +245,7 @@ let create
   let tx_ctrl =
     Tx_controller.create scope
     { Tx_controller.I.clock        = clock;
-      rst                         = rst;
+      reset                         = reset;
       en                          = en;
       start                       = inputs.I.tx_start;
       fifo_empty                  = ~:(tx_fifo.rd_valid);
@@ -259,8 +258,8 @@ let create
 
   let tx_dp =
     Tx_datapath.create scope
-    { Tx_datapath.I.clock           = clock;
-      rst                          = rst;
+    { Tx_datapath.I.clock          = clock;
+      reset = reset;
       en                           = en;
       s_axis_tdata                 = tx_fifo.rd_data.data;
       s_axis_tvalid                = tx_fifo.rd_valid;
@@ -274,7 +273,7 @@ let create
   let tx_ser =
     Tx_byte_disassembler.create scope
     { Tx_byte_disassembler.I.clock          = clock;
-      rst                                  = rst;
+      reset;
       en                                   = en;
       byte_in                              = tx_dp.byte_out;
       byte_in_valid                        = ~:(tx_ctrl.state ==:. 0);
@@ -289,8 +288,9 @@ let create
   let crc_active = (tx_ctrl.state >=:. 3) &: (tx_ctrl.state <=:. 6) in
   let tx_crc_inst =
     Tx_crc.create scope
-    { Tx_crc.I.clock       = clock;
-      rst                  = rst;
+    { 
+      Tx_crc.I.clock       = clock;
+      reset                  = reset;
       en                   = ~:(tx_ctrl.state ==:. 0);
       data                 = tx_dp.byte_out;
       data_valid           = wire_dis_ready &: crc_active;

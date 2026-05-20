@@ -17,8 +17,8 @@ let () =
 
 module I = struct
   type 'a t = {
-    clk : 'a;
-    rst : 'a;
+    clock : 'a;
+    reset : 'a;
     en  : 'a;
 
     s_axis_tdata  : 'a [@bits 8];
@@ -48,8 +48,8 @@ let create
   =
   let _scope : Scope.t = Scope.sub_scope scope "tx_datapath_scope" in
 
-  let _clk         = i.I.clk in
-  let _rst         = i.I.rst in
+  let _clock         = i.I.clock in
+  let _rst         = i.I.reset in
   let _en          = i.I.en in
   let mac_byte_sel = i.I.mac_byte_sel in
 
@@ -104,3 +104,4 @@ let create
     keep          = lsb byte_mux;
   }
 ;;
+

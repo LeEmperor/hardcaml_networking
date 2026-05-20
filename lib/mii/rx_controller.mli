@@ -12,8 +12,8 @@ open! Hardcaml
 module I : sig
   type 'a t = {
     (* spec *)
-    clk : 'a;
-    rst : 'a;
+    clock : 'a;
+    reset : 'a;
     en  : 'a;
 
     (* control lines  *)

@@ -10,9 +10,9 @@ let () =
 module I = struct
   type 'a t = {
     (* spec *)
-    clk : 'a;
-    rst : 'a;
-    en  : 'a;
+    clock : 'a;
+    reset : 'a;
+    en    : 'a;
 
     (* data lignes *)
     rx_data : 'a [@bits 8];
@@ -54,14 +54,14 @@ let create
   let _scope : Scope.t = Scope.sub_scope scope "rx_crc_scope" in
 
   (* port aliase *)
-  let clk           = i.I.clk in
-  let rst           = i.I.rst in
+  let clock         = i.I.clock in
+  let reset           = i.I.reset in
   let en            = i.I.en in
   let rx_data       = i.I.rx_data in
   let rx_data_valid = i.I.rx_data_valid in
 
   (* no ~clear:rst — init value is controlled explicitly in the compile block *)
-  let rising_edge = Reg_spec.create ~clock:clk () in
+  let rising_edge = Reg_spec.create ~clock () in
   let crc_reg = reg ~enable:vdd ~width:32 rising_edge in
 
   let crc_init    = Signal.of_int_trunc ~width:32 0xFFFFFFFF in
@@ -69,7 +69,7 @@ let create
   let crc_residue = Signal.of_int_trunc ~width:32 0xDEBB20E3 in
 
   compile [
-    if_ (rst |: ~:en) [
+    if_ (reset |: ~:en) [
       crc_reg <-- crc_init;
     ] [
       when_ rx_data_valid [
