@@ -8,10 +8,11 @@
     Second_pulse  — 1 Hz heartbeat LED, clocked from clk100mhz
 
   btn[0] is used as an active-high synchronous reset for both clock domains.
+  btn[3] triggers a TX frame once the sequencer has saturated.
 
   RX frames are drained immediately (m_axis_tready = vdd).
-  TX path is idle (s_axis_tvalid = gnd; tx_start = gnd).
-  eth_ref_clk is stubbed to gnd — replace with a 25 MHz MMCM output via ODDR.
+  TX: sequencer_counter fills the TX FIFO at 1 Hz after the PHY comes out of reset,
+      then saturates and holds. btn[3] (active-high) fires tx_start after seq_done.
 *)
 
 open! Core
@@ -26,10 +27,7 @@ module O = Board_top.O
 
 module I_Wires = struct
   type 'a t = {
-    sequencer_data : 'a;
-
-    clk25 : 'a;
-    clk100 : 'a;
+    sequencer_data : 'a [@bits 8];
   } [@@deriving hardcaml]
 end
 
@@ -39,97 +37,93 @@ module I_Regs = struct
   } [@@deriving hardcaml]
 end
 
-let create 
-  (scope : Scope.t) 
-  (i : _ I.t) 
-  : _ O.t 
+let create
+  (scope : Scope.t)
+  (i : _ I.t)
+  : _ O.t
   =
-  let rst           : Signal.t = Signal.bit i.I.btn ~pos:0 in (* btn[0]: active-high synchronous reset *)
-  let en            : Signal.t = Signal.bit i.I.sw ~pos:0 in (* sw[0]: active-high *)
+  let open Always in
+  let open Variable in
+
+  let rst : Signal.t = Signal.bit i.I.btn ~pos:0 in (* btn[0]: active-high synchronous reset *)
+  let en  : Signal.t = Signal.bit i.I.sw  ~pos:0 in (* sw[0]: active-high enable *)
 
   let i_wires = I_Wires.Of_always.wire Signal.zero in
   I_Wires.Of_always.apply_names ~prefix:"wire_" ~naming_op:(Scope.naming scope) i_wires;
 
-  (* circular clock dependency? *)
-  let spec100 = Reg_spec.create
-    ~clock:i.I.clk100mhz ~clear:rst () in
+  let spec100 = Reg_spec.create ~clock:i.I.clk100mhz ~clear:rst () in
 
-  let clk_div_inst = Clk_div.create scope 
-    {
-      Clk_div.I.src_clk = i.I.clk100mhz;
-      rst;
-      en;
-    }
-  in
+  let clk_div_inst = Clk_div.create scope {
+    Clk_div.I.src_clk = i.I.clk100mhz;
+    rst;
+    en;
+  } in
 
-  let spec25 = Reg_spec.create 
-    ~clock:clk_div_inst.dst_clk ~clear:rst () in 
-  (* why don't I need the O.dst_clk accessor here for the clk_div_inst call? *)
+  let _spec25 = Reg_spec.create ~clock:clk_div_inst.dst_clk ~clear:rst () in
 
   let i_regs = I_Regs.Of_always.reg ~enable:vdd spec100 in
   I_Regs.Of_always.apply_names ~prefix:"reg_" ~naming_op:(Scope.naming scope) i_regs;
 
-  let mac_inst  =
-    Mac_top.create scope {
-      Mac_top.I.clock       = i.I.eth_rx_clk;
-      reset                 = rst;
-      en                    = vdd;
-      rx_dv                 = i.I.eth_rx_dv;
-      rx_er                 = i.I.eth_rxerr;
-      rx_data               = i.I.eth_rxd;
-      m_axis_tready         = vdd;     (* drain all incoming frames immediately *)
-      s_axis_tdata          = zero 8;
-      s_axis_tvalid         = gnd;
-      s_axis_tuser          = gnd;
-      tx_start              = gnd;
-    }
+  let heartbeat_inst = Second_pulse.create scope {
+    Second_pulse.I.clk = i.I.clk100mhz;
+    rst;
+  } in
+
+  (* hold the PHY rst high for ~0.66 ms after board power-on *)
+  let phy_rst_cnt : Signal.t =
+    Signal.reg_fb spec100 ~enable:vdd ~width:17
+      ~f:(fun q ->
+          mux2 rst (zero 17)
+            (mux2 (msb q) q (q +:. 1)))
   in
 
-  let heartbeat_inst =
-    Second_pulse.create scope 
-    {
-      Second_pulse.I.clk = i.I.clk100mhz;
-      rst;
-    }
+  (* sequencer: counts up one beat per heartbeat pulse after PHY is ready.
+     saturates when MSB flips (~128 pulses = ~2 min) and holds forever. *)
+  let phy_ready = Signal.msb phy_rst_cnt -- "phy_ready" in
+
+  let sequencer_counter : Signal.t =
+    Signal.reg_fb spec100 ~width:8 ~enable:heartbeat_inst.pulse
+      ~f:(fun q ->
+          mux2 rst (zero 8)
+            (mux2 phy_ready
+              (mux2 (msb q) q (q +:. 1))
+              (zero 8)))
+    -- "sequencer_counter"
   in
 
-  (* hold the PHY rst high for a bit after board power on *)
-  let phy_rst_cnt : Signal.t = 
-    Signal.reg_fb spec100 ~enable:vdd ~width:17 
-      ~f:( fun q -> (* a function f takes in an input q *)
-          mux2 rst 
-          (zero 17) 
-          (mux2 (msb q) q (q +:. 1))
-      )
-  in
+  let seq_done = Signal.msb sequencer_counter -- "seq_done" in
+  let btn3     = Signal.bit i.I.btn ~pos:3    -- "btn3" in
 
-  (* fifo sequencer filler *)
-  (* every second, the sequencer should get in a new entry of an ascending ordered decimal item *)
+  let mac_inst = Mac_top.create scope {
+    Mac_top.I.clock       = i.I.eth_rx_clk;
+    reset                 = rst;
+    en                    = vdd;
+    rx_dv                 = i.I.eth_rx_dv;
+    rx_er                 = i.I.eth_rxerr;
+    rx_data               = i.I.eth_rxd;
+    m_axis_tready         = vdd;
+    s_axis_tdata          = sequencer_counter;
+    s_axis_tvalid         = heartbeat_inst.pulse &: phy_ready &: ~:seq_done;
+    s_axis_tuser          = gnd;
+    tx_start              = seq_done &: btn3;
+  } in
 
-  let d_in : Signal.t = Signal.wire 0 in
-  let d_in_valid = heartbeat_inst.pulse in
-
-  (* this reg should sit on which reg spec and which enable line? *)
-  let sequencer_counter = Signal.reg_fb (spec100) ~width:8 ~enable:heartbeat_inst.pulse
-    ~f: (fun q -> (* select on rst, from *)
-      mux2 rst 
-      (zero 8)
-      (q +:. 1)
-    )
-  in
+  compile [
+    i_wires.sequencer_data <-- sequencer_counter;
+    i_regs.sequencer_on    <-- seq_done;
+  ];
 
   ignore heartbeat_inst.keep;
   ignore mac_inst.keep;
 
   { O.
-    (* led[0]=1 Hz heartbeat  led[1]=last-frame CRC ok  led[2]=in payload  led[3]=unused *)
-
-    (* concate a list of Signal.t *)
-    led = concat_msb [ 
-      gnd;                    (* LED3 *)
-      gnd;                    (* LED2*)
-      mac_inst.in_payload;    (* LED1 *)
-      mac_inst.frame_crc_ok;  (* LED0 *)
+    (* LED3: sequencer saturated  LED2: PHY out of reset
+       LED1: RX in payload        LED0: last RX frame CRC ok *)
+    led = concat_msb [
+      seq_done;
+      phy_ready;
+      mac_inst.in_payload;
+      mac_inst.frame_crc_ok;
     ];
 
     led0_r = heartbeat_inst.pulse;
@@ -148,11 +142,11 @@ let create
     led3_g = gnd;
     led3_b = gnd;
 
-    uart_rxd_out = vdd;    (* UART idle-high; not used in this test *)
+    uart_rxd_out = vdd;
 
-    eth_mdc      = gnd;    (* MDC unused: no PHY register access *)
+    eth_mdc      = gnd;
     eth_rstn     = Signal.msb phy_rst_cnt;
-    eth_ref_clk  = clk_div_inst.dst_clk;     
+    eth_ref_clk  = clk_div_inst.dst_clk;
     eth_tx_en    = mac_inst.tx_en;
     eth_txd      = mac_inst.tx_d;
   }
