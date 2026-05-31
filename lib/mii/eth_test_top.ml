@@ -24,16 +24,50 @@ let () =
 module I = Board_top.I
 module O = Board_top.O
 
+module I_Wires = struct
+  type 'a t = {
+    sequencer_data : 'a;
+
+    clk25 : 'a;
+    clk100 : 'a;
+  } [@@deriving hardcaml]
+end
+
+module I_Regs = struct
+  type 'a t = {
+    sequencer_on : 'a;
+  } [@@deriving hardcaml]
+end
+
 let create 
   (scope : Scope.t) 
   (i : _ I.t) 
   : _ O.t 
   =
-  let rst : Signal.t = Signal.bit i.I.btn ~pos:0 in (* btn[0]: active-high synchronous reset *)
-  let en  : Signal.t = Signal.bit i.I.sw ~pos:0 in (* sw[0]: active-high *)
+  let rst           : Signal.t = Signal.bit i.I.btn ~pos:0 in (* btn[0]: active-high synchronous reset *)
+  let en            : Signal.t = Signal.bit i.I.sw ~pos:0 in (* sw[0]: active-high *)
 
-  (* let en  : Signal.t = select i.I.sw ~high:0 ~low: 0 in (* sw[0]: active-high *) *)
-  (* let rst : Signal.t = select i.I.btn ~high:0 ~low:0 in (* btn[0]: active-high synchronous reset *) *)
+  let i_wires = I_Wires.Of_always.wire Signal.zero in
+  I_Wires.Of_always.apply_names ~prefix:"wire_" ~naming_op:(Scope.naming scope) i_wires;
+
+  (* circular clock dependency? *)
+  let spec100 = Reg_spec.create
+    ~clock:i.I.clk100mhz ~clear:rst () in
+
+  let clk_div_inst = Clk_div.create scope 
+    {
+      Clk_div.I.src_clk = i.I.clk100mhz;
+      rst;
+      en;
+    }
+  in
+
+  let spec25 = Reg_spec.create 
+    ~clock:clk_div_inst.dst_clk ~clear:rst () in 
+  (* why don't I need the O.dst_clk accessor here for the clk_div_inst call? *)
+
+  let i_regs = I_Regs.Of_always.reg ~enable:vdd spec100 in
+  I_Regs.Of_always.apply_names ~prefix:"reg_" ~naming_op:(Scope.naming scope) i_regs;
 
   let mac_inst  =
     Mac_top.create scope {
@@ -59,20 +93,29 @@ let create
     }
   in
 
-  let clk_div_inst = 
-    Clk_div.create scope {
-      Clk_div.I.src_clk = i.I.clk100mhz;
-      rst;
-      en;
-    }
-  in
-
   (* hold the PHY rst high for a bit after board power on *)
-  let spec100 = Reg_spec.create ~clock:i.I.clk100mhz () in
   let phy_rst_cnt : Signal.t = 
     Signal.reg_fb spec100 ~enable:vdd ~width:17 
       ~f:( fun q -> (* a function f takes in an input q *)
-          mux2 rst (zero 17) (mux2 (msb q) q (q +:. 1)))
+          mux2 rst 
+          (zero 17) 
+          (mux2 (msb q) q (q +:. 1))
+      )
+  in
+
+  (* fifo sequencer filler *)
+  (* every second, the sequencer should get in a new entry of an ascending ordered decimal item *)
+
+  let d_in : Signal.t = Signal.wire 0 in
+  let d_in_valid = heartbeat_inst.pulse in
+
+  (* this reg should sit on which reg spec and which enable line? *)
+  let sequencer_counter = Signal.reg_fb (spec100) ~width:8 ~enable:heartbeat_inst.pulse
+    ~f: (fun q -> (* select on rst, from *)
+      mux2 rst 
+      (zero 8)
+      (q +:. 1)
+    )
   in
 
   ignore heartbeat_inst.keep;
