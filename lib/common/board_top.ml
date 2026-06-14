@@ -5,19 +5,21 @@
   Every port in I/O maps 1:1 to a real IOB pin and has an XDC constraint.
   XDC pin locations are noted inline for each signal.
 
-  ── Bidirectional pins ───────────────────────────────────────────────────────
+  ===== Bidirectional pins =====
   Pmods JA-JD, ChipKit digital/analog headers, ChipKit I2C, MDIO, and QSPI DQ
   are all bidirectional. They are NOT included here because Hardcaml I/O modules
   only represent unidirectional ports; inout requires Xilinx IOBUF primitives.
   Add them by instantiating IOBUF via Hardcaml's Instantiation module, or in a
   thin Verilog wrapper around the generated RTL.
 
-  ── eth_ref_clk ─────────────────────────────────────────────────────────────
+  ===== eth_ref_clk =====
   Drives the PHY's reference clock input. Must be routed through an ODDR
   primitive clocked by a 25 MHz MMCM output — do not drive directly from a
-  fabric register.
+  fabric register. 
+    NOTE: You can drive from fabric clk division, but do so at your own risk.
+    Roughly calculated for a clk with 2ns of drift, you should be able to divide down 200Mhz without too much issue.
 
-  ── Power-measurement / XADC pins ───────────────────────────────────────────
+  ===== Power-measurement / XADC pins =====
   vsnsvu, vsns5v0, isns5v0, isns0v95 connect to the on-chip XADC. Instantiate
   the XADC primitive directly; do not add these as fabric-level inputs here.
 *)

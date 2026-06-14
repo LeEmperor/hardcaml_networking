@@ -85,6 +85,9 @@ let create
        where f captures everything in one tidy closure.  The trade-off flips once you
        have interdependent registers or non-trivial branching. *)
 
-  { O. pulse = pulse.value; keep = pulse.value }
+  { 
+    O.pulse = pulse.value; 
+    keep    = pulse.value;
+  }
 ;;
 
