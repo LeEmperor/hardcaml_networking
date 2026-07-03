@@ -6,13 +6,19 @@
   Instantiated submodules:
     Mac_top       — full-duplex MII MAC, clocked from eth_rx_clk
     Second_pulse  — 1 Hz heartbeat LED, clocked from clk100mhz
+    Second_pulse  — 1 Hz RX drain pulse, clocked from eth_rx_clk (25 MHz)
 
   btn[0] is used as an active-high synchronous reset for both clock domains.
   btn[3] triggers a TX frame once the sequencer has saturated.
 
-  RX frames are drained immediately (m_axis_tready = vdd).
+  RX: one byte drained per second (rx_heartbeat on eth_rx_clk); lower nibble shown on led[3:0].
   TX: sequencer_counter fills the TX FIFO at 1 Hz after the PHY comes out of reset,
       then saturates and holds. btn[3] (active-high) fires tx_start after seq_done.
+
+  RGB LED mapping:
+    led0_r — 100 MHz heartbeat blink
+    led1_r — seq_done (TX sequencer saturated)   led1_g — phy_ready
+    led2_g — frame_crc_ok (last RX frame CRC)    led2_b — in_payload (RX active)
 *)
 
 open! Core
@@ -69,6 +75,8 @@ let create
     rst;
   } in
 
+
+
   (* hold the PHY rst high for ~0.66 ms after board power-on *)
   let phy_rst_cnt : Signal.t =
     Signal.reg_fb spec100 ~enable:vdd ~width:17
@@ -94,6 +102,22 @@ let create
   let seq_done = Signal.msb sequencer_counter -- "seq_done" in
   let btn3     = Signal.bit i.I.btn ~pos:3    -- "btn3" in
 
+  (* Heartbeat visibility: Second_pulse emits a single-cycle pulse (10 ns once
+     per second) — far too brief to see. Toggle a flip-flop on each pulse to get
+     a 0.5 Hz, 50%-duty square wave (on 1 s, off 1 s) that the eye can track. *)
+  let heartbeat_toggle =
+    Signal.reg_fb spec100 ~enable:heartbeat_inst.pulse ~width:1
+      ~f:(fun q -> ~:q)
+    -- "heartbeat_toggle"
+  in
+
+  let spec_rx = Reg_spec.create ~clock:i.I.eth_rx_clk ~clear:rst () in
+
+  let rx_heartbeat = Second_pulse.create ~clk_freq:25_000_000 scope {
+    Second_pulse.I.clk = i.I.eth_rx_clk;
+    rst;
+  } in
+
   let mac_inst = Mac_top.create scope {
     Mac_top.I.clock       = i.I.eth_rx_clk;
     reset                 = rst;
@@ -101,7 +125,7 @@ let create
     rx_dv                 = i.I.eth_rx_dv;
     rx_er                 = i.I.eth_rxerr;
     rx_data               = i.I.eth_rxd;
-    m_axis_tready         = vdd;
+    m_axis_tready         = rx_heartbeat.pulse;
     s_axis_tdata          = sequencer_counter;
     s_axis_tvalid         = heartbeat_inst.pulse &: phy_ready &: ~:seq_done;
     s_axis_tuser          = gnd;
@@ -113,23 +137,26 @@ let create
     i_regs.sequencer_on    <-- seq_done;
   ];
 
+  let last_byte = Signal.reg spec_rx
+    ~enable:(rx_heartbeat.pulse &: mac_inst.m_axis_tvalid)
+    mac_inst.m_axis_tdata
+  in
+
   ignore heartbeat_inst.keep;
   ignore mac_inst.keep;
+  ignore rx_heartbeat.keep;
 
   { O.
-    (* LED3: sequencer saturated  LED2: PHY out of reset
-       LED1: RX in payload        LED0: last RX frame CRC ok *)
-    led = concat_msb [
-      seq_done;
-      phy_ready;
-      mac_inst.in_payload;
-      mac_inst.frame_crc_ok;
-    ];
+    (* led[3:0]: lower nibble of last received RX byte, updated at 1 Hz *)
+    led = Signal.select last_byte ~high:3 ~low:0;
 
-    led0_r = heartbeat_inst.pulse;
+    led0_r = heartbeat_toggle;
     led0_g = gnd;
     led0_b = gnd;
 
+    (* led1_r = seq_done; *)
+    (* led1_g = phy_ready; *)
+    (* led1_r = mac_inst.in_payload; *)
     led1_r = gnd;
     led1_g = gnd;
     led1_b = gnd;
