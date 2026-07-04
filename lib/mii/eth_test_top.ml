@@ -1,7 +1,7 @@
 (*
   Module: Eth_test_top
   Board-level Ethernet test design for the Arty A7-100T.
-  Uses Board_top.I/O as its pin interface and instantiates the full MAC stack.
+  Uses Arty_board_top.I/O as its pin interface and instantiates the full MAC stack.
 
   Instantiated submodules:
     Mac_top       — full-duplex MII MAC, clocked from eth_rx_clk
@@ -28,8 +28,8 @@ open! Signal
 let () =
   Stdio.print_endline "=== Imported Eth Test Top ==="
 
-module I = Board_top.I
-module O = Board_top.O
+module I = Arty_board_top.I
+module O = Arty_board_top.O
 
 module I_Wires = struct
   type 'a t = {
