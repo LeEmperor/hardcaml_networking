@@ -27,7 +27,8 @@
   LED map:
     led[3:0]  lower nibble of last drained RX byte
     led0_r    heartbeat toggle
-    led2_g    last-frame CRC ok        led2_b  in_payload (RX active)
+    led1_r    seq_done (TX sequencer saturated)  led1_g  phy_ready
+    led2_g    last-frame CRC ok                  led2_b  in_payload (RX active)
     led3_r    last-frame CRC bad
 *)
 
@@ -161,8 +162,9 @@ let create
     led0_g = gnd;
     led0_b = gnd;
 
-    led1_r = gnd;
-    led1_g = gnd;
+    (* ported from eth_test_top before it was axed *)
+    led1_r = seq_done;   (* TX sequencer saturated *)
+    led1_g = phy_ready;  (* PHY out of hard reset  *)
     led1_b = gnd;
 
     led2_r = gnd;
