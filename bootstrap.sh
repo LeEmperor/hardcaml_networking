@@ -17,8 +17,10 @@ INSTALL_DEPS=0
 # Do not use `opam install . --deps-only` by default against a shared switch.
 REQUIRED_PACKAGES=(
   dune
+  core
   hardcaml
   ppx_hardcaml
+  hardcaml_circuits
 )
 
 TEST_PACKAGES=(

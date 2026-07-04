@@ -1,17 +1,19 @@
 (lang dune 3.17)
 
-(name EthMac_of_Hardcaml)
+(name hardcaml_networking)
 
 (generate_opam_files true)
 
 (package
- (name EthMac_of_Hardcaml)
+ (name hardcaml_networking)
  (allow_empty)
- (synopsis "Ethernet MAC (10/100) components written in Hardcaml")
+ (synopsis "Networking hardware (Ethernet MAC, UART) written in Hardcaml")
  (depends
   (ocaml (>= 5.1))
   (dune (>= 3.15))
+  core
   hardcaml
   ppx_hardcaml
+  hardcaml_circuits
   hardcaml_waveterm
   alcotest))
