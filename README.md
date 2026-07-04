@@ -1,6 +1,6 @@
-# EthMac_of_Hardcaml
+# hardcaml_networking
 
-Ethernet MAC for 10/100 MBPs transfers. Targeted on Arty A7-100T DP83848x PHY present on board. 
+Networking hardware written in Hardcaml. Currently a full-duplex Ethernet MAC for 10/100 MBPs transfers. Targeted on Arty A7-100T DP83848x PHY present on board. 
 
 Written in [HardCaml](https://github.com/janestreet/hardcaml) as a learning project. Any suggestions or contributions welcome.
 
