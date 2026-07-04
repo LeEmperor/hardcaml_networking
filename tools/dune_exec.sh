@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$BUILD_WORKSPACE_DIRECTORY"
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: bazel run //tools:exec -- <dune-executable> [args...]" >&2
+  echo "usage: ./tools/dune_exec.sh <dune-executable> [args...]" >&2
   echo >&2
   echo "example:" >&2
-  echo "  bazel run //tools:exec -- ./bin/main.exe" >&2
+  echo "  ./tools/dune_exec.sh test/mii/tx_path_tb.exe" >&2
   exit 1
 fi
 

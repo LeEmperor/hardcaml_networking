@@ -17,8 +17,13 @@ module Rx_word = struct
   type 'a t = {
     data : 'a [@bits 8];
     last : 'a;
-    keep : 'a; (* unused *)
-    user : 'a; 
+    user : 'a;
+    (* NB: no [keep] field. tkeep is constant 1 on a single-byte MAC, so it was
+       previously packed as [Signal.vdd] into the FIFO word. Writing a constant
+       into the async FIFO's distributed RAM makes Vivado constant-propagate that
+       RAM bit and orphan the read-address pin on the primitive it shares with
+       [user] — the "Driverless net ram_reg_0_63_9_10/DPRA0" DRC failure. tkeep is
+       now tied high directly on the read side instead of crossing the FIFO. *)
   } [@@deriving hardcaml]
 end
 
@@ -237,7 +242,6 @@ let create
   let rx_wr_word =
     { Rx_word.data = wr_data_d;
       last         = tlast_wr;
-      keep         = Signal.vdd;
       user         = mux2 tlast_wr (~: (crc_inst.crc_valid)) Signal.gnd;
     }
   in
@@ -375,7 +379,7 @@ let create
     m_axis_tdata  = rx_rd_word.data;
     m_axis_tvalid = rx_fifo.valid;
     m_axis_tlast  = rx_rd_word.last;
-    m_axis_tkeep  = rx_rd_word.keep;
+    m_axis_tkeep  = Signal.vdd;  (* single-byte MAC: tkeep is always 1, tied off here rather than crossed through the FIFO RAM *)
     m_axis_tuser  = rx_rd_word.user;
 
     in_preamble   = controller_inst.in_preamble;

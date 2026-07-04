@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$BUILD_WORKSPACE_DIRECTORY"
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [ "$#" -lt 1 ]; then
   echo "usage: open_wave.sh <vcd-file>" >&2

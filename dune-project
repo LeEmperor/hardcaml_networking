@@ -6,6 +6,7 @@
 
 (package
  (name EthMac_of_Hardcaml)
+ (allow_empty)
  (synopsis "Ethernet MAC (10/100) components written in Hardcaml")
  (depends
   (ocaml (>= 5.1))

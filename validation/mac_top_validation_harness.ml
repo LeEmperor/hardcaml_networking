@@ -254,6 +254,20 @@ let create
       mac_inst.m_axis_tdata
   in
 
+  (* ── Consume the AXI-S sideband (tlast/tuser) ──────────────────────────────
+     These outputs come off the async-FIFO read port. If nothing downstream
+     reads them, Vivado partially trims the FIFO's distributed RAM and leaves
+     the read-address (DPRA) nets on the top RAM bit driverless — the
+     "Route 35-13 Driverless net ram_reg_0_63_9_9/DPRA*" DRC failure. Latching
+     tuser (CRC error) at tlast keeps those read bits connected to a real output
+     pin, and doubles as a live CRC-error indicator from the drained stream. *)
+  let rx_axis_crc_err =
+    Signal.reg_fb spec_tx ~width:1
+      ~enable:(rx_drain.pulse &: mac_inst.m_axis_tvalid &: mac_inst.m_axis_tlast)
+      ~f:(fun _q -> mac_inst.m_axis_tuser)
+    -- "rx_axis_crc_err"
+  in
+
   (* keep debug OR-reductions alive so synthesis doesn't prune the submodules *)
   ignore heartbeat.keep;
   ignore rx_drain.keep;
@@ -271,7 +285,7 @@ let create
     led1_g = phy_ready;     (* PHY out of hard reset                 *)
     led1_b = gnd;
 
-    led2_r = gnd;
+    led2_r = rx_axis_crc_err;  (* CRC error latched from AXI-S tuser@tlast (also anti-prunes FIFO sideband) *)
     led2_g = frame_crc_ok_tx;
     led2_b = in_payload_tx;
 

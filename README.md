@@ -60,4 +60,14 @@ Use ```opam install --switch=5.2.0+ox -y dune hardcaml ppx_hardcaml hardcaml_wav
 ---
 
 # Setup
-Run ```./bootstrap.sh```, followed by ```source ./env.sh```. You will see relevant targets for [Bazel](https://bazel.build/) listed as examples.
+Run ```./bootstrap.sh```, followed by ```source ./env.sh``` to select the OxCaml opam switch for the current shell.
+
+The project builds entirely with [dune](https://dune.build/). All commands go through `./scripts/with-switch.sh` so they run on the `5.2.0+ox` switch:
+
+```sh
+./scripts/with-switch.sh dune build      # build everything
+./scripts/with-switch.sh dune runtest    # run all testbenches
+./scripts/with-switch.sh dune fmt        # format
+```
+
+Convenience wrappers in `./tools` (e.g. `./tools/dune_tb.sh test/mii/tx_path_tb.exe`, `./tools/open_wave.sh waves/waves_top.vcd`) do the same and can be run directly.
