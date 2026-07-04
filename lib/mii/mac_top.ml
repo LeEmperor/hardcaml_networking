@@ -118,9 +118,12 @@ let create
     let wire_emit_payload       = Signal.wire 1 in
     let wire_fcs_present        = Signal.wire 1 in
 
-    let keep = Signal.wire 1 in
+    (* NB: no forward-declared [keep] wire here. keep-folding is a pure sink
+       (nothing feeds back into it), so it is built at the end of [create] once
+       every submodule instance is in scope — see the [reduce] below. Forward
+       wires are only needed to break combinational cycles, which this isn't. *)
 
-    let datapath_inst : Signal.t Rx_datapath.O.t = 
+    let datapath_inst : Signal.t Rx_datapath.O.t =
       Rx_datapath.create 
         scope
       {
@@ -242,6 +245,14 @@ let create
     }
   in
 
+  (* TODO(magic-state-numbers): the TX wiring below compares tx_ctrl.state
+     against raw literals. The current Tx_controller encoding is:
+       0=Idle 1=Preamble 2=Sfd 3=Dst_mac 4=Src_mac 5=Eth_type 6=Payload 7=Fcs
+     so [state ==:. 6] = Payload, [state >=:. 3 &: <=:. 6] = the CRC-covered
+     header+payload window, and [state ==:. 0] = Idle. These literals silently
+     break if the FSM states are reordered/renamed. When the _intf.ml
+     unification lands, expose named state predicates (or a decoded one-hot)
+     from Tx_controller and replace every literal here with those. *)
   let tx_ctrl =
     Tx_controller.create scope
     { Tx_controller.I.clock        = clock;
@@ -254,6 +265,7 @@ let create
   in
 
   (* Pop FIFO and advance controller only when the serializer can accept the next byte *)
+  (* state 6 = Payload (see magic-state-numbers TODO above) *)
   Signal.(wire_tx_fifo_rd_en <-- (tx_ctrl.state ==:. 6 &: wire_dis_ready));
 
   let tx_dp =
@@ -283,8 +295,13 @@ let create
   Signal.(wire_dis_ready <-- tx_ser.ready);
 
   (* CRC accumulates dst_mac/src_mac/eth_type/payload (states 3-6), gated on
-     dis_ready so each byte is counted exactly once.  en=0 in Idle resets the
-     accumulator between frames.  byte_sel drives the FCS byte mux in Fcs state. *)
+     dis_ready so each byte is counted exactly once.  byte_sel drives the FCS
+     byte mux in Fcs state.
+     NOTE: the Tx_crc [en] input below is NOT the module's global [en] — it is
+     locally tied to ~:(state==0). That doubles as the CRC's inter-frame reset:
+     en falls in Idle (state 0) and clears the accumulator between frames. Same
+     for the serializer's byte_in_valid. If Idle ever stops being state 0, this
+     silent reset breaks along with the magic-state-numbers TODO above. *)
   let crc_active = (tx_ctrl.state >=:. 3) &: (tx_ctrl.state <=:. 6) in
   let tx_crc_inst =
     Tx_crc.create scope

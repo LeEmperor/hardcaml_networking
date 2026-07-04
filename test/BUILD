@@ -15,9 +15,9 @@ sh_binary(
 )
 
 sh_binary(
-    name = "wave_rx_mac_top_tb",
+    name = "wave_rx_path_tb",
     srcs = ["//tools/open_wave.sh"],
-    args = ["waves/rx_mac_top_tb.vcd"],
+    args = ["waves/rx_path_tb.vcd"],
     visibility = ["//visibility:public"],
 )
 
