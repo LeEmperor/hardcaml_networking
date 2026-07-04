@@ -85,6 +85,22 @@ set_property -dict {PACKAGE_PIN J14 IOSTANDARD LVCMOS33} [get_ports {eth_txd[1]}
 set_property -dict {PACKAGE_PIN J13 IOSTANDARD LVCMOS33} [get_ports {eth_txd[2]}]
 set_property -dict {PACKAGE_PIN H17 IOSTANDARD LVCMOS33} [get_ports {eth_txd[3]}]
 
+## ── Source-synchronous I/O timing (DP83848 MII) ───────────────────────────
+## These paths stay WITHIN a single clock group, so the async clock_groups below
+## do NOT cut them — they are (and must be) timed against their own clock.
+##
+## RX: the PHY launches RXD/RX_DV/RX_ER off eth_rx_clk; they are captured by
+## eth_rx_clk registers in the MAC. Delay = PHY clock-to-out (Tco) + board trace.
+## TX: the PHY samples TXD/TX_EN on eth_tx_clk. Max = PHY setup (Tsu) + trace,
+## min = -hold (Th).
+## TODO: replace the placeholder values below with the real min/max from the
+## DP83848 datasheet "MII Receive/Transmit Timing" sections (25 MHz / 40 ns).
+set_input_delay  -clock eth_rx_clk -max 20.0 [get_ports {eth_rxd[*] eth_rx_dv eth_rxerr}]
+set_input_delay  -clock eth_rx_clk -min 10.0 [get_ports {eth_rxd[*] eth_rx_dv eth_rxerr}]
+
+set_output_delay -clock eth_tx_clk -max 10.0 [get_ports {eth_txd[*] eth_tx_en}]
+set_output_delay -clock eth_tx_clk -min -2.0 [get_ports {eth_txd[*] eth_tx_en}]
+
 ## ── Timing exceptions ─────────────────────────────────────────────────────
 
 # sw and btn are slow switch/button inputs

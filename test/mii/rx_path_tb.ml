@@ -11,7 +11,7 @@ module Sim = Cyclesim.With_interface(Mac_top.I)(Mac_top.O)
 
 let create_sim () =
   let scope = Scope.create ~flatten_design:true ~auto_label_hierarchical_ports:true () in
-  let sim   = Sim.create ~config:Cyclesim.Config.trace_all (Mac_top.create scope) in
+  let sim   = Sim.create ~config:Cyclesim.Config.trace_all (Mac_top.create ~rx_fifo_for_sim:true scope) in
   let waves, sim = Waveform.create sim in
   let inputs  : _ Mac_top.I.t = Cyclesim.inputs  sim in
   let outputs : _ Mac_top.O.t = Cyclesim.outputs sim in
@@ -45,7 +45,8 @@ let () =
   Out_channel.with_file "waves_top.vcd" ~f:(fun oc ->
   let sim = Vcd.wrap oc sim in
 
-  let t_rst    = inputs.reset in
+  let t_rst_rx = inputs.rx_reset in
+  let t_rst_tx = inputs.tx_reset in
   let t_en     = inputs.en in
   let t_in     = inputs.rx_data in
   let t_rx_dv  = inputs.rx_dv in
@@ -56,11 +57,13 @@ let () =
   let reset () =
     t_tready <-- 0;
     t_en     <-- 0;
-    t_rst    <-- 1;
+    t_rst_rx <-- 1;
+    t_rst_tx <-- 1;
     t_rx_dv  <-- 0;
     cycle ();
-    t_en  <-- 1;
-    t_rst <-- 0;
+    t_en     <-- 1;
+    t_rst_rx <-- 0;
+    t_rst_tx <-- 0;
   in
 
   let dst_mac     = 0x36_12_73_36_24_85 in

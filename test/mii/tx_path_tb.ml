@@ -43,7 +43,7 @@ module Sim = Cyclesim.With_interface(Mac_top.I)(Mac_top.O)
 
 let create_sim () =
   let scope = Scope.create ~flatten_design:true ~auto_label_hierarchical_ports:true () in
-  let sim   = Sim.create ~config:Cyclesim.Config.trace_all (Mac_top.create scope) in
+  let sim   = Sim.create ~config:Cyclesim.Config.trace_all (Mac_top.create ~rx_fifo_for_sim:true scope) in
   let waves, sim = Waveform.create sim in
   let inputs  : _ Mac_top.I.t = Cyclesim.inputs  sim in
   let outputs : _ Mac_top.O.t = Cyclesim.outputs sim in
@@ -117,14 +117,16 @@ let () =
   let cycle () = Cyclesim.cycle sim in
 
   let reset () =
-    inputs.reset        <-- 1;
+    inputs.rx_reset     <-- 1;
+    inputs.tx_reset     <-- 1;
     inputs.en           <-- 0;
     inputs.tx_start     <-- 0;
     inputs.s_axis_tvalid <-- 0;
     inputs.rx_dv        <-- 0;
     cycle ();
-    inputs.reset <-- 0;
-    inputs.en    <-- 1;
+    inputs.rx_reset <-- 0;
+    inputs.tx_reset <-- 0;
+    inputs.en       <-- 1;
   in
 
   (* hardcoded frame header constants — must match tx_datapath.ml:
