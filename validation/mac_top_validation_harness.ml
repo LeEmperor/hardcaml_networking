@@ -16,18 +16,19 @@
 
     eth_tx_clk domain (MAC + everything it touches — TX data is registered on the
     same edge the PHY samples, per the DP83848 MII TX timing):
-      sequencer     → fills TX FIFO with incrementing bytes after PHY is ready,
-                      then trips tx_start (manual: btn[3])
+      TX trigger FSM→ one btn[3] press burst-fills the TX FIFO with a 46-byte
+                      payload, then pulses tx_start (fill + transmit, atomic)
       Mac_top       → RX (PHY→AXI-S) + TX (AXI-S→PHY)
       Second_pulse  → 1 Hz RX drain (m_axis_tready)
       Regs (stub)   → AXI4-Lite status/control block, taps MAC status for readback
 
-  Controls: btn[0] = active-high sync reset, sw[0] = enable, btn[3] = fire TX.
+  Controls: btn[0] = active-high sync reset, sw[0] = enable,
+            btn[3] = one-shot "fill FIFO then transmit" trigger.
 
   LED map:
     led[3:0]  lower nibble of last drained RX byte
     led0_r    heartbeat toggle
-    led1_r    seq_done (TX sequencer saturated)  led1_g  phy_ready
+    led1_r    tx_busy (TX frame in flight)       led1_g  phy_ready
     led2_g    last-frame CRC ok                  led2_b  in_payload (RX active)
     led3_r    last-frame CRC bad
 *)
@@ -39,6 +40,16 @@ open! Signal
 
 let () =
   Stdio.print_endline "=== Imported MAC Validation Harness ==="
+
+(* One-shot TX trigger FSM (see the sequencer block in [create]):
+     Idle  wait for a debounced/edged btn[3] press
+     Fill  burst-write the payload into the TX FIFO, one byte per cycle
+     Fire  pulse tx_start (whole payload now staged)
+     Busy  hold until the MAC reports tx_busy low, then re-arm *)
+module Tx_trigger_states = struct
+  type t = Idle | Fill | Fire | Busy
+  [@@deriving sexp_of, compare ~localize, enumerate]
+end
 
 (* Reuse the canonical board pin contract as the harness port interface. *)
 module I = Arty_board_top.I
@@ -55,22 +66,23 @@ let create
   let spec100 = Reg_spec.create ~clock:i.I.clk100mhz ~clear:rst () in
   let spec_tx = Reg_spec.create ~clock:i.I.eth_tx_clk ~clear:rst () in
 
-  (* ── 25 MHz reference clock to the PHY ───────────────────────────────────── *)
+  (* ==== 25 MHz reference clock to the PHY ==== *)
+  (* using a crude fabric divider - jitter is oof but at this speed it doesn't matter *)
   let clk_div_inst = Clk_div.create scope {
     Clk_div.I.src_clk = i.I.clk100mhz;
     rst;
     en;
   } in
 
-  (* ── PHY hard reset: hold eth_rstn low ~0.66 ms, then release and hold high ─ *)
+  (* ==== PHY hard reset: hold eth_rstn low ~0.66 ms, then release and hold high ==== *)
   let phy_rst_cnt =
     Signal.reg_fb spec100 ~enable:vdd ~width:17
       ~f:(fun q -> mux2 rst (zero 17) (mux2 (msb q) q (q +:. 1)))
     -- "phy_rst_cnt"
   in
-  let phy_ready = Signal.msb phy_rst_cnt -- "phy_ready" in
+  let phy_ready = Signal.msb phy_rst_cnt -- "dbg_phy_ready" in
 
-  (* ── Heartbeat: 1 Hz pulse toggled into a 0.5 Hz square wave on led0 ──────── *)
+  (* ==== Heartbeat: 1 Hz pulse toggled into a 0.5 Hz square wave on led0 ==== *)
   let heartbeat = Second_pulse.create scope {
     Second_pulse.I.clk = i.I.clk100mhz;
     rst;
@@ -80,22 +92,72 @@ let create
     -- "heartbeat_toggle"
   in
 
-  (* ── TX sequencer ────────────────────────────────────────────────────────── *)
-  (* Fills the TX FIFO with an incrementing byte per heartbeat pulse once the PHY
-     is out of reset, saturates when the MSB flips, then holds. btn[3] fires the
-     one-shot tx_start after saturation.
-     TODO: replace the ~0.66 ms phy_ready gate with a ~3 s autoneg-settle wait
-     (75_000_000 cycles @ 25 MHz), and auto-fire tx_start on seq_done rising edge
-     — see the reference eth_test.sv for the fuller sequencer. *)
-  let sequencer_counter =
-    Signal.reg_fb spec100 ~enable:heartbeat.pulse ~width:8
-      ~f:(fun q ->
-          mux2 rst (zero 8)
-            (mux2 phy_ready (mux2 (msb q) q (q +:. 1)) (zero 8)))
-    -- "sequencer_counter"
+  (* ==== One-shot button-triggered TX ==== *)
+  (* A single btn[3] press stages a full payload into the TX FIFO and then fires
+     tx_start — the entire "fill + transmit" sequence from one press. The FSM
+     runs in the eth_tx_clk domain so its FIFO writes are coherent with the MAC's
+     TX FIFO write clock. btn[3] is synchronized in and reduced to a one-shot
+     rising edge, so one press = exactly one frame; the FSM re-arms only after
+     the MAC reports tx_busy low.
+
+     payload_len MUST be >= 46 (minimum Ethernet payload). Below that the TX
+     controller stalls in Payload waiting on FIFO data that never comes — the
+     exact hang exercised/avoided in tx_path_tb.ml. *)
+  let payload_len = 46 in
+  let btn3 = Signal.bit i.I.btn ~pos:3 -- "btn3" in
+
+  (* wire-back stubs break the FSM <-> MAC instantiation cycle *)
+  let wire_tx_busy  = Signal.wire 1 -- "wire_tx_busy"  in
+  let wire_tx_ready = Signal.wire 1 -- "wire_tx_ready" in
+
+  (* 2-FF sync btn[3] into the tx-clk domain, then take a one-shot rising edge *)
+  let btn3_tx   = Signal.reg spec_tx (Signal.reg spec_tx btn3) -- "btn3_tx" in
+  let btn3_edge = btn3_tx &: ~:(Signal.reg spec_tx btn3_tx) -- "btn3_edge" in
+  (* phy_ready is a quasi-static level from the 100 MHz domain; 2-FF sync it *)
+  let phy_ready_tx =
+    Signal.reg spec_tx (Signal.reg spec_tx phy_ready) -- "dbg_phy_ready_tx"
   in
-  let seq_done = Signal.msb sequencer_counter -- "seq_done" in
-  let btn3     = Signal.bit i.I.btn ~pos:3    -- "btn3" in
+
+  let sm = Always.State_machine.create (module Tx_trigger_states) ~enable:vdd spec_tx in
+  let fill_count = Always.Variable.reg ~enable:vdd ~width:6 spec_tx in
+  let tx_tvalid  = Always.Variable.wire ~default:gnd () in
+  let tx_tstart  = Always.Variable.wire ~default:gnd () in
+
+  (* payload bytes: incrementing 0x01, 0x02, … 0x2E (mirrors tx_path_tb.ml) *)
+  let fill_byte = uresize (fill_count.value +:. 1) ~width:8 -- "fill_byte" in
+
+  Always.(compile [
+    sm.switch [
+      Tx_trigger_states.Idle, [
+        when_ (btn3_edge &: phy_ready_tx) [
+          fill_count <--. 0;
+          sm.set_next Tx_trigger_states.Fill;
+        ];
+      ];
+      Tx_trigger_states.Fill, [
+        (* write one byte whenever the FIFO can accept it; tvalid and the count
+           advance together so each byte is written exactly once *)
+        when_ (wire_tx_ready) [
+          tx_tvalid <-- vdd;
+          if_ (fill_count.value ==:. (payload_len - 1)) [
+            sm.set_next Tx_trigger_states.Fire;
+          ] [
+            fill_count <-- fill_count.value +:. 1;
+          ];
+        ];
+      ];
+      Tx_trigger_states.Fire, [
+        (* whole payload staged — kick off transmission *)
+        tx_tstart <-- vdd;
+        sm.set_next Tx_trigger_states.Busy;
+      ];
+      Tx_trigger_states.Busy, [
+        when_ (~:wire_tx_busy) [
+          sm.set_next Tx_trigger_states.Idle;
+        ];
+      ];
+    ];
+  ]);
 
   (* ── RX drain: pop one byte per second, show low nibble on the plain LEDs ─── *)
   let rx_drain = Second_pulse.create ~clk_freq:25_000_000 scope {
@@ -112,11 +174,15 @@ let create
     rx_er           = i.I.eth_rxerr;
     rx_data         = i.I.eth_rxd;
     m_axis_tready   = rx_drain.pulse;
-    s_axis_tdata    = sequencer_counter;
-    s_axis_tvalid   = heartbeat.pulse &: phy_ready &: ~:seq_done;
+    s_axis_tdata    = fill_byte;
+    s_axis_tvalid   = tx_tvalid.value;
     s_axis_tuser    = gnd;
-    tx_start        = seq_done &: btn3;
+    tx_start        = tx_tstart.value;
   } in
+
+  (* close the wire-back loop now that the MAC exists *)
+  Signal.(wire_tx_busy  <-- mac_inst.tx_busy);
+  Signal.(wire_tx_ready <-- mac_inst.s_axis_tready);
 
   (* ── Register block (STUB) ───────────────────────────────────────────────── *)
   (* AXI4-Lite slave tied off for now — no on-board master yet. It taps MAC
@@ -162,9 +228,8 @@ let create
     led0_g = gnd;
     led0_b = gnd;
 
-    (* ported from eth_test_top before it was axed *)
-    led1_r = seq_done;   (* TX sequencer saturated *)
-    led1_g = phy_ready;  (* PHY out of hard reset  *)
+    led1_r = wire_tx_busy;  (* TX frame in flight (btn[3]-triggered) *)
+    led1_g = phy_ready;     (* PHY out of hard reset                 *)
     led1_b = gnd;
 
     led2_r = gnd;

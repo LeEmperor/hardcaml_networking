@@ -12,11 +12,19 @@
   Expected frame layout:
     [0..6]   preamble:  7 × 0x55
     [7]      SFD:       0xD5
-    [8..13]  dst_mac:   hardcoded in tx_datapath (0x12 0x34 0x56 0x78 0x90 0xAB)
-    [14..19] src_mac:   hardcoded in tx_datapath (0xAB 0x90 0x78 0x56 0x34 0x12)
-    [20..21] eth_type:  hardcoded in tx_datapath (0x08 0x00)
-    [22..59] payload:   38 bytes from FIFO
-    [60..63] FCS:       CRC-32 over [8..59]
+    [8..13]  dst_mac:   hardcoded in tx_datapath (broadcast: ff ff ff ff ff ff)
+    [14..19] src_mac:   hardcoded in tx_datapath (locally-admin: 02 00 00 00 00 01)
+    [20..21] eth_type:  hardcoded in tx_datapath (0x9999 custom)
+    [22..67] payload:   46 bytes from FIFO
+    [68..71] FCS:       CRC-32 over [8..67]
+
+  NOTE: the payload is 46 bytes because tx_controller enforces the standard
+  minimum Ethernet payload (min frame = 14 header + 46 payload + 4 FCS = 64
+  bytes on the wire, excluding preamble/SFD). The Payload state only advances
+  while the FIFO is non-empty, so a sub-minimum payload (< 46 bytes) stalls the
+  FSM in Payload with tx_en stuck high — the RTL has no zero-padding logic yet.
+  Sub-minimum frames are intentionally NOT exercised here; adding them would
+  require padding support in tx_datapath/tx_controller first.
 *)
 
 open! Core
@@ -24,6 +32,10 @@ open! Hardcaml
 open! Mii_of_hardcaml
 open! Hardcaml_waveterm
 open! Helper_tb_functions
+
+(* Set to [true] to dump the ASCII waveform to stdout at the end of the run.
+   The VCD (waves_tx_top.vcd) is always written regardless of this flag. *)
+let print_waveform = false
 
 let () = print_endline "=== Running MAC TX Top Testbench ==="
 
@@ -77,11 +89,16 @@ let collect_frame ~cycle ~outputs ~max_wait =
     then waiting := false
     else (cycle (); incr i)
   done;
-  (* collect while tx_en is high *)
-  while tx_en () do
+  (* collect while tx_en is high, bounded so an underflow (FSM stall) fails
+     loudly instead of hanging the sim forever *)
+  let guard = ref 0 in
+  while tx_en () && !guard < max_wait do
     nibbles := !nibbles @ [tx_d ()];
-    cycle ()
+    cycle ();
+    incr guard
   done;
+  if !guard >= max_wait then
+    printf "WARNING: tx_en never deasserted within %d cycles — likely FSM stall (payload underflow?)\n" max_wait;
   (* reassemble pairs [lo; hi] → byte *)
   let rec pair = function
     | lo :: hi :: rest -> ((hi lsl 4) lor lo) :: pair rest
@@ -110,13 +127,14 @@ let () =
     inputs.en    <-- 1;
   in
 
-  (* hardcoded frame header constants from tx_datapath.ml *)
-  let exp_dst_mac  = [0x12; 0x34; 0x56; 0x78; 0x90; 0xAB] in
-  let exp_src_mac  = [0xAB; 0x90; 0x78; 0x56; 0x34; 0x12] in
-  let exp_eth_type = [0x08; 0x00] in
+  (* hardcoded frame header constants — must match tx_datapath.ml:
+       dst = broadcast, src = locally-administered (02:..), ethertype 0x9999 *)
+  let exp_dst_mac  = [0xFF; 0xFF; 0xFF; 0xFF; 0xFF; 0xFF] in
+  let exp_src_mac  = [0x02; 0x00; 0x00; 0x00; 0x00; 0x01] in
+  let exp_eth_type = [0x99; 0x99] in
 
-  (* 38-byte payload: sequential values 0x01..0x26 for easy inspection *)
-  let payload_bytes = List.init 38 ~f:(fun i -> i + 1) in
+  (* 46-byte payload (minimum Ethernet): sequential values 0x01..0x2E for easy inspection *)
+  let payload_bytes = List.init 46 ~f:(fun i -> i + 1) in
 
   (* SW reference FCS covers everything after preamble, before FCS itself *)
   let frame_for_crc = exp_dst_mac @ exp_src_mac @ exp_eth_type @ payload_bytes in
@@ -145,7 +163,7 @@ let () =
   (* collect the frame off the MII pins *)
   let frame = collect_frame ~cycle ~outputs ~max_wait:300 in
 
-  printf "frame length: %d bytes (expect 64)\n" (List.length frame);
+  printf "frame length: %d bytes (expect 72)\n" (List.length frame);
   List.iteri frame ~f:(fun i b -> printf "  [%2d] 0x%02x\n" i b);
 
   (* parse and check *)
@@ -172,11 +190,11 @@ let () =
   let t1_eth_type  = check_region "eth_type " 20 exp_eth_type   in
   let t1_payload   = check_region "payload  " 22 payload_bytes  in
 
-  let t1_fcs = check_region "fcs      " 60 expected_fcs in
+  let t1_fcs = check_region "fcs      " 68 expected_fcs in
 
   let t1_ok = t1_preamble && t1_sfd && t1_dst_mac && t1_src_mac && t1_eth_type && t1_payload && t1_fcs in
   printf "test 1: %s\n" (if t1_ok then "PASS" else "FAIL");
 
   print_endline "\n=== SIMULATION COMPLETE ===";
-  Waveform.print ~display_width:100 waves;
+  if print_waveform then Waveform.print ~display_width:100 waves;
   )

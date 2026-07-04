@@ -79,6 +79,9 @@ module O = struct
     tx_d  : 'a [@bits 4];
     tx_en : 'a;
 
+    (* TX status: 1 while a frame is being transmitted (Preamble..Fcs) *)
+    tx_busy : 'a;
+
     (* TX AXI-Stream backpressure *)
     s_axis_tready : 'a;
 
@@ -349,6 +352,7 @@ let create
     frame_done    = Signal.reg rising_edge frame_end_d;
     tx_d          = tx_ser.tx_d;
     tx_en         = tx_ser.tx_en;
+    tx_busy       = tx_ctrl.tx_busy;
     s_axis_tready = ~:(tx_fifo.full);
     keep          = keep;
   }

@@ -35,6 +35,7 @@ module O = struct
     mac_byte_sel : 'a [@bits 3];
     crc_en       : 'a;
     state        : 'a [@bits 3];
+    tx_busy      : 'a;  (* 1 while a frame is in flight (Preamble..Fcs), 0 in Idle *)
   } [@@deriving hardcaml]
 end
 
@@ -171,11 +172,12 @@ let create
       Fcs, [ (* 4 bytes *)
         when_ (dis_ready) [
           if_ (i_regs.byte_counter.value ==:. 3) [
+            (* last FCS byte — frame complete, drop busy exactly on return to Idle *)
             rst_counter;
+            i_regs.busy <--. 0;
             sm.set_next Idle;
           ] [
             i_wires.crc_en <--. 1;
-            i_regs.busy <--. 0;
             increm_counter;
           ];
         ];
@@ -188,4 +190,5 @@ let create
     mac_byte_sel = select i_regs.byte_counter.value ~high:2 ~low:0;
     crc_en       = i_wires.crc_en.value;
     state        = sm.current;
+    tx_busy      = i_regs.busy.value;
   }
