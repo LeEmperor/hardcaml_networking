@@ -24,8 +24,11 @@ let () =
   in
   let hier = Rtl.create Verilog [ circ ] in
   let rtl = Rtl.full_hierarchy hier in
-  (* dune exec runs with cwd = repo root; drop the RTL next to the Vivado project. *)
-  let out = "validation/mac_top_validation_harness.v" in
+  (* Anchor the output to the repo root so it lands next to the Vivado project no
+     matter which directory [dune exec] was invoked from. DUNE_SOURCEROOT is set
+     by dune at runtime; fall back to cwd when running the raw binary. *)
+  let root = Option.value (Sys.getenv "DUNE_SOURCEROOT") ~default:"." in
+  let out = Filename.concat root "validation/mac_top_validation_harness.v" in
   Out_channel.write_all out ~data:(Rope.to_string rtl);
   Stdio.printf "wrote %s\n" out
 ;;
