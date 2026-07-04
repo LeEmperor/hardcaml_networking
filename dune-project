@@ -11,7 +11,9 @@
  (depends
   (ocaml (>= 5.1))
   (dune (>= 3.15))
+  core
   hardcaml
   ppx_hardcaml
+  hardcaml_circuits
   hardcaml_waveterm
   alcotest))

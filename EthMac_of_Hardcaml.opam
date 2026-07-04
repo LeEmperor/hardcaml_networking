@@ -4,8 +4,10 @@ synopsis: "Ethernet MAC (10/100) components written in Hardcaml"
 depends: [
   "ocaml" {>= "5.1"}
   "dune" {>= "3.17" & >= "3.15"}
+  "core"
   "hardcaml"
   "ppx_hardcaml"
+  "hardcaml_circuits"
   "hardcaml_waveterm"
   "alcotest"
   "odoc" {with-doc}
