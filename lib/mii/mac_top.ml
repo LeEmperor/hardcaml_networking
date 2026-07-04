@@ -17,12 +17,28 @@ module Rx_word = struct
   type 'a t = {
     data : 'a [@bits 8];
     last : 'a;
-    keep : 'a; (* unused *)
-    user : 'a; 
+    user : 'a;
+    (* NB: no [keep] field. tkeep is constant 1 on a single-byte MAC, so it was
+       previously packed as [Signal.vdd] into the FIFO word. Writing a constant
+       into the async FIFO's distributed RAM makes Vivado constant-propagate that
+       RAM bit and orphan the read-address pin on the primitive it shares with
+       [user] — the "Driverless net ram_reg_0_63_9_10/DPRA0" DRC failure. tkeep is
+       now tied high directly on the read side instead of crossing the FIFO. *)
   } [@@deriving hardcaml]
 end
 
-module Rx_fifo = Hardcaml_circuits.Fast_fifo.Make (Rx_word)
+(* RX FIFO is the RX→TX clock-domain crossing: a Gray-coded asynchronous FIFO,
+   written on rx_clock (PHY RX domain) and read on tx_clock (consumer domain).
+   The whole Rx_word (data+last+keep+user) is packed into the flat [data_in]
+   bus and unpacked on the read side, so tlast/tuser stay attached to their byte
+   across the crossing.  Depth 2^6 = 64: kept within a single distributed-RAM
+   address range to avoid the Gray-pointer addressing glitches Async_fifo warns
+   about above 2^LUT_SIZE. *)
+module Rx_async_fifo = Hardcaml.Async_fifo.Make (struct
+  let width = Rx_word.sum_of_port_widths
+  let log2_depth = 6
+  let optimize_for_same_clock_rate_and_always_reading = false
+end)
 
 module Tx_word = struct
   type 'a t = {
@@ -34,12 +50,18 @@ module Tx_fifo = Hardcaml_circuits.Fast_fifo.Make (Tx_word)
 
 module I = struct
   type 'a t = {
-    (* spec *)
-    clock     : 'a; (* rx_clock *)
-    reset     : 'a; (* rx rst *)
+    (* ── clocks / resets ──
+       Two independent domains, as required by MII:
+       - rx_clock (eth_rx_clk): RX data from the PHY is source-synchronous to it.
+       - tx_clock (eth_tx_clk): the PHY samples TX data on it.
+       Each domain has its own (already-synchronized) reset. *)
+    rx_clock  : 'a;
+    rx_reset  : 'a;
+    tx_clock  : 'a;
+    tx_reset  : 'a;
     en        : 'a;
 
-    (* ethernet phy lines *)
+    (* ethernet phy rx lines (rx_clock domain) *)
     rx_dv   : 'a; (* activity line *)
     rx_er   : 'a; (* phy error line *)
     rx_data : 'a [@bits 4];
@@ -79,6 +101,9 @@ module O = struct
     tx_d  : 'a [@bits 4];
     tx_en : 'a;
 
+    (* TX status: 1 while a frame is being transmitted (Preamble..Fcs) *)
+    tx_busy : 'a;
+
     (* TX AXI-Stream backpressure *)
     s_axis_tready : 'a;
 
@@ -87,24 +112,31 @@ module O = struct
   } [@@deriving hardcaml]
 end
 
-let create 
+let create
+  ?(rx_fifo_for_sim = false)
   (scope : Scope.t )
   inputs : (_ O.t)
-  = 
+  =
     let open Always in
     let open Variable in
 
     (* port aliases *)
-    let clock  = inputs.I.clock in
-    let reset  = inputs.I.reset in
-    let clear  = reset in
-    let en     = inputs.I.en in
-    let d_in   = inputs.I.rx_data in
-    let d_out  = Signal.wire 8 in
+    let rx_clock = inputs.I.rx_clock in
+    let rx_reset = inputs.I.rx_reset in
+    let tx_clock = inputs.I.tx_clock in
+    let tx_reset = inputs.I.tx_reset in
+    let en       = inputs.I.en in
+    let d_in     = inputs.I.rx_data in
+    let d_out    = Signal.wire 8 in
 
-    let rising_edge : Reg_spec.t = 
-      Reg_spec.create ~clock ~clear () 
-    in
+    (* rx_spec (eth_rx_clk) clocks all top-level RX pipeline registers: byte
+       assembler, datapath, CRC, and the RX FIFO write side. RX pins are
+       source-synchronous to eth_rx_clk. The TX submodules take tx_clock/tx_reset
+       directly, so there is no top-level tx reg spec here.
+       NOTE: at this step the RX FIFO is still a single-clock Fast_fifo clocked on
+       rx_clock; the true async CDC bridge (Async_fifo, write=rx / read=tx) is the
+       next step. Until then, m_axis is still in the rx_clock domain. *)
+    let rx_spec : Reg_spec.t = Reg_spec.create ~clock:rx_clock ~clear:rx_reset () in
 
     (* internal ties *)
     (* let wire_byte_assembler_en = wire ~default:gnd in (* does this autosize? *) *)
@@ -118,16 +150,19 @@ let create
     let wire_emit_payload       = Signal.wire 1 in
     let wire_fcs_present        = Signal.wire 1 in
 
-    let keep = Signal.wire 1 in
+    (* NB: no forward-declared [keep] wire here. keep-folding is a pure sink
+       (nothing feeds back into it), so it is built at the end of [create] once
+       every submodule instance is in scope — see the [reduce] below. Forward
+       wires are only needed to break combinational cycles, which this isn't. *)
 
-    let datapath_inst : Signal.t Rx_datapath.O.t = 
+    let datapath_inst : Signal.t Rx_datapath.O.t =
       Rx_datapath.create 
         scope
       {
         Rx_datapath.I.rx_data           = d_in;
         Rx_datapath.I.byte_assembler_en = wire_byte_assembler_en;
-        Rx_datapath.I.clock             = clock;
-        Rx_datapath.I.reset             = reset;
+        Rx_datapath.I.clock             = rx_clock;
+        Rx_datapath.I.reset             = rx_reset;
         Rx_datapath.I.en                = en;
         Rx_datapath.I.payload_sel       = wire_payload_sel;
         Rx_datapath.I.dst_mac_reg_en    = wire_dst_mac_reg_en;
@@ -142,8 +177,8 @@ let create
       Rx_controller.create 
         scope
       {
-        Rx_controller.I.clock = clock;
-        Rx_controller.I.reset = reset;
+        Rx_controller.I.clock = rx_clock;
+        Rx_controller.I.reset = rx_reset;
         Rx_controller.I.en             = en;
         Rx_controller.I.rx_dv          = inputs.I.rx_dv;
         Rx_controller.I.rx_er          = inputs.I.rx_er;
@@ -164,7 +199,7 @@ let create
   Signal.(wire_emit_payload       <-- controller_inst.emit_payload);
   Signal.(wire_fcs_present        <-- controller_inst.fcs_present);
 
-  let frame_end   = Helper_circuits.falling_edge_detector rising_edge inputs.I.rx_dv in
+  let frame_end   = Helper_circuits.falling_edge_detector rx_spec inputs.I.rx_dv in
   (* rx_dv drops before byte_valid fires for FCS[3] (the last byte).  Extend
      crc_en through frame_end so the CRC processes that final byte and settles
      at the residue on the cycle when we sample crc_valid for tuser. *)
@@ -174,8 +209,8 @@ let create
 
   let crc_inst =
     Rx_crc.create scope
-    { Rx_crc.I.clock         = clock;
-      reset                  = reset;
+    { Rx_crc.I.clock         = rx_clock;
+      reset                  = rx_reset;
       en                     = crc_en;
       rx_data                = datapath_inst.raw_byte_out;
       rx_data_valid          = datapath_inst.raw_byte_out_valid;
@@ -186,11 +221,11 @@ let create
      B(F3) = the extra cycle after rx_dv drops (raw_byte_out_valid=1 for FCS[3]).
      wr_enable_raw=1 at B(F3) → wr_valid_d=1 one cycle later (i=0 of drain phase).
      frame_end fires at B(F3); frame_end_d fires at i=0, aligning with wr_valid_d. *)
-  let frame_end_d = Signal.reg rising_edge frame_end in
+  let frame_end_d = Signal.reg rx_spec frame_end in
   (* frame_end fires when rx_dv drops; crc_reg updates with FCS[3] at the clock
      edge ending that cycle.  frame_end_d fires one cycle later when crc_valid
      is already settled — that is the correct sample point. *)
-  let frame_ok    = Signal.reg rising_edge ~enable:frame_end_d crc_inst.crc_valid in
+  let frame_ok    = Signal.reg rx_spec ~enable:frame_end_d crc_inst.crc_valid in
 
   (* gate on raw_byte_out_valid: the datapath holds payload_out_valid high
      between nibble pairs, so without this gate every byte would be written twice *)
@@ -198,30 +233,38 @@ let create
   (* 1-cycle delay: crc_inst.crc_valid is combinatorial from crc_reg, which is updated
      at the clock edge that processes FCS[3]. the delayed write lands on the following
      cycle when crc_valid is already settled, so we can use it directly for tuser. *)
-  let wr_data_d  = Signal.reg rising_edge datapath_inst.payload_out in
-  let wr_valid_d = Signal.reg rising_edge wr_enable_raw in
+  let wr_data_d  = Signal.reg rx_spec datapath_inst.payload_out in
+  let wr_valid_d = Signal.reg rx_spec wr_enable_raw in
   (* tlast: frame_end_d (1-cycle-delayed falling edge) aligns with wr_valid_d for last byte *)
   let tlast_wr   = frame_end_d &: wr_valid_d in
 
-  let rx_fifo =
-    Rx_fifo.create
-    ~cut_through:true
-    ~capacity:128
-    scope
-    {
-      Rx_fifo.I.clock = clock;
-      clear = reset;
-      wr_enable = wr_valid_d;
-      wr_data =
-        {
-          Rx_word.data = wr_data_d;
-          last         = tlast_wr;
-          keep         = Signal.vdd;
-          user         = mux2 tlast_wr (~: (crc_inst.crc_valid)) Signal.gnd;
-        };
-        rd_enable = inputs.m_axis_tready
+  (* pack the RX word on the write (rx_clock) side; unpack on the read (tx_clock) side *)
+  let rx_wr_word =
+    { Rx_word.data = wr_data_d;
+      last         = tlast_wr;
+      user         = mux2 tlast_wr (~: (crc_inst.crc_valid)) Signal.gnd;
     }
   in
+  (* Async_fifo uses async resets internally, which Cyclesim can't model; the
+     testbenches pass [~rx_fifo_for_sim:true] to swap in the sync-clear variant.
+     The eta-expansion over [i] keeps both branches at type [I.t -> O.t]. *)
+  let rx_fifo_impl (i : Signal.t Rx_async_fifo.I.t) : Signal.t Rx_async_fifo.O.t =
+    if rx_fifo_for_sim
+    then Rx_async_fifo.For_testing.create_with_synchronous_clear_semantics_for_simulation_only ~scope i
+    else Rx_async_fifo.create ~scope i
+  in
+  let rx_fifo =
+    rx_fifo_impl
+      { Rx_async_fifo.I.clock_write = rx_clock;
+        reset_write                 = rx_reset;
+        clock_read                  = tx_clock;
+        reset_read                  = tx_reset;
+        data_in                     = Rx_word.Of_signal.pack rx_wr_word;
+        write_enable                = wr_valid_d;
+        read_enable                 = inputs.m_axis_tready;
+      }
+  in
+  let rx_rd_word = Rx_word.Of_signal.unpack rx_fifo.data_out in
 
   (* TX payload FIFO: AXI-S writes in, controller reads out during Payload state.
      wire_tx_fifo_rd_en and wire_dis_ready break instantiation-order dependencies. *)
@@ -234,18 +277,26 @@ let create
     ~cut_through:true
     ~capacity:128
     scope
-    { Tx_fifo.I.clock     = clock;
-      clear = reset;
+    { Tx_fifo.I.clock     = tx_clock;
+      clear = tx_reset;
       wr_enable           = inputs.I.s_axis_tvalid;
       wr_data             = { Tx_word.data = inputs.I.s_axis_tdata };
       rd_enable           = wire_tx_fifo_rd_en;
     }
   in
 
+  (* TODO(magic-state-numbers): the TX wiring below compares tx_ctrl.state
+     against raw literals. The current Tx_controller encoding is:
+       0=Idle 1=Preamble 2=Sfd 3=Dst_mac 4=Src_mac 5=Eth_type 6=Payload 7=Fcs
+     so [state ==:. 6] = Payload, [state >=:. 3 &: <=:. 6] = the CRC-covered
+     header+payload window, and [state ==:. 0] = Idle. These literals silently
+     break if the FSM states are reordered/renamed. When the _intf.ml
+     unification lands, expose named state predicates (or a decoded one-hot)
+     from Tx_controller and replace every literal here with those. *)
   let tx_ctrl =
     Tx_controller.create scope
-    { Tx_controller.I.clock        = clock;
-      reset                         = reset;
+    { Tx_controller.I.clock        = tx_clock;
+      reset                         = tx_reset;
       en                          = en;
       start                       = inputs.I.tx_start;
       fifo_empty                  = ~:(tx_fifo.rd_valid);
@@ -254,12 +305,13 @@ let create
   in
 
   (* Pop FIFO and advance controller only when the serializer can accept the next byte *)
+  (* state 6 = Payload (see magic-state-numbers TODO above) *)
   Signal.(wire_tx_fifo_rd_en <-- (tx_ctrl.state ==:. 6 &: wire_dis_ready));
 
   let tx_dp =
     Tx_datapath.create scope
-    { Tx_datapath.I.clock          = clock;
-      reset = reset;
+    { Tx_datapath.I.clock          = tx_clock;
+      reset = tx_reset;
       en                           = en;
       s_axis_tdata                 = tx_fifo.rd_data.data;
       s_axis_tvalid                = tx_fifo.rd_valid;
@@ -272,8 +324,8 @@ let create
 
   let tx_ser =
     Tx_byte_disassembler.create scope
-    { Tx_byte_disassembler.I.clock          = clock;
-      reset;
+    { Tx_byte_disassembler.I.clock          = tx_clock;
+      reset                                = tx_reset;
       en                                   = en;
       byte_in                              = tx_dp.byte_out;
       byte_in_valid                        = ~:(tx_ctrl.state ==:. 0);
@@ -283,14 +335,19 @@ let create
   Signal.(wire_dis_ready <-- tx_ser.ready);
 
   (* CRC accumulates dst_mac/src_mac/eth_type/payload (states 3-6), gated on
-     dis_ready so each byte is counted exactly once.  en=0 in Idle resets the
-     accumulator between frames.  byte_sel drives the FCS byte mux in Fcs state. *)
+     dis_ready so each byte is counted exactly once.  byte_sel drives the FCS
+     byte mux in Fcs state.
+     NOTE: the Tx_crc [en] input below is NOT the module's global [en] — it is
+     locally tied to ~:(state==0). That doubles as the CRC's inter-frame reset:
+     en falls in Idle (state 0) and clears the accumulator between frames. Same
+     for the serializer's byte_in_valid. If Idle ever stops being state 0, this
+     silent reset breaks along with the magic-state-numbers TODO above. *)
   let crc_active = (tx_ctrl.state >=:. 3) &: (tx_ctrl.state <=:. 6) in
   let tx_crc_inst =
     Tx_crc.create scope
     { 
-      Tx_crc.I.clock       = clock;
-      reset                  = reset;
+      Tx_crc.I.clock       = tx_clock;
+      reset                  = tx_reset;
       en                   = ~:(tx_ctrl.state ==:. 0);
       data                 = tx_dp.byte_out;
       data_valid           = wire_dis_ready &: crc_active;
@@ -319,19 +376,20 @@ let create
   (**)
 
   {
-    m_axis_tdata  = rx_fifo.rd_data.data;
-    m_axis_tvalid = rx_fifo.rd_valid;
-    m_axis_tlast  = rx_fifo.rd_data.last;
-    m_axis_tkeep  = rx_fifo.rd_data.keep;
-    m_axis_tuser  = rx_fifo.rd_data.user;
+    m_axis_tdata  = rx_rd_word.data;
+    m_axis_tvalid = rx_fifo.valid;
+    m_axis_tlast  = rx_rd_word.last;
+    m_axis_tkeep  = Signal.vdd;  (* single-byte MAC: tkeep is always 1, tied off here rather than crossed through the FIFO RAM *)
+    m_axis_tuser  = rx_rd_word.user;
 
     in_preamble   = controller_inst.in_preamble;
     in_dst_mac    = controller_inst.in_dst_mac;
     in_payload    = controller_inst.in_payload;
     frame_crc_ok  = frame_ok;
-    frame_done    = Signal.reg rising_edge frame_end_d;
+    frame_done    = Signal.reg rx_spec frame_end_d;
     tx_d          = tx_ser.tx_d;
     tx_en         = tx_ser.tx_en;
+    tx_busy       = tx_ctrl.tx_busy;
     s_axis_tready = ~:(tx_fifo.full);
     keep          = keep;
   }

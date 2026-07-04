@@ -18,12 +18,6 @@ _build/
 CLAUDE.md
 
 # build system
-third_party/bazel/bazel
-.bazelisk/
-bazel-*
-.tools/
 _opam/
 env.sh
-.bazelrc
-MODULE.bazel.lock
 *.vcd

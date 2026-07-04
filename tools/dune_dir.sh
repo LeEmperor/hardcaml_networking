@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$BUILD_WORKSPACE_DIRECTORY"
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [ "$#" -lt 2 ]; then
   echo "usage: dune_dir.sh <build|test|fmt|exec> <target> [args...]" >&2

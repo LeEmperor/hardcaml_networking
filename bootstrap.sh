@@ -9,12 +9,7 @@ SWITCH="${OPAM_SWITCH:-5.2.0+ox}"
 # We expect OxCaml 5.2.x for now.
 REQUIRED_OCAML_PREFIX="${REQUIRED_OCAML_PREFIX:-5.2}"
 
-# Repo-local Bazelisk launcher version.
-BAZELISK_VERSION="${BAZELISK_VERSION:-v1.22.1}"
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOOLS_BIN="$ROOT/.tools/bin"
-BAZEL="$TOOLS_BIN/bazel"
 
 INSTALL_DEPS=0
 
@@ -45,7 +40,7 @@ usage() {
 usage: ./bootstrap.sh [--install-deps]
 
 Default behavior:
-  Verify repo-local Bazel, shared OxCaml switch, and required packages.
+  Verify the shared OxCaml switch and required opam packages.
 
 Options:
   --install-deps
@@ -76,51 +71,6 @@ parse_args() {
         ;;
     esac
   done
-}
-
-detect_platform() {
-  local os arch
-
-  case "$(uname -s)" in
-    Linux) os="linux" ;;
-    Darwin) os="darwin" ;;
-    *) die "unsupported OS: $(uname -s)" ;;
-  esac
-
-  case "$(uname -m)" in
-    x86_64|amd64) arch="amd64" ;;
-    arm64|aarch64) arch="arm64" ;;
-    *) die "unsupported architecture: $(uname -m)" ;;
-  esac
-
-  echo "${os}-${arch}"
-}
-
-install_bazelisk() {
-  mkdir -p "$TOOLS_BIN"
-
-  if [ -x "$BAZEL" ]; then
-    echo "Using repo-local bazel: $BAZEL"
-    return
-  fi
-
-  local platform url
-  platform="$(detect_platform)"
-  url="https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-${platform}"
-
-  echo "Installing repo-local bazel launcher..."
-  echo "  $url"
-  echo "  -> $BAZEL"
-
-  if command -v curl >/dev/null 2>&1; then
-    curl -L "$url" -o "$BAZEL"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -O "$BAZEL" "$url"
-  else
-    die "need curl or wget to download Bazelisk"
-  fi
-
-  chmod +x "$BAZEL"
 }
 
 check_opam() {
@@ -233,30 +183,13 @@ write_env_file() {
 #
 #   source ./env.sh
 #
-# This makes the repo-local Bazel launcher available as \`bazel\`
-# and sets the default opam switch used by wrapper scripts.
+# This sets the default opam switch used by the dune wrapper scripts
+# in ./scripts and ./tools.
 
 export OPAM_SWITCH="$SWITCH"
-export PATH="$TOOLS_BIN:\$PATH"
 EOF
 
   echo "Wrote env.sh"
-}
-
-write_optional_bazelrc() {
-  if [ -f "$ROOT/.bazelrc" ]; then
-    return
-  fi
-
-  cat > "$ROOT/.bazelrc" <<EOF
-common --announce_rc
-
-# Prevent Bazel convenience symlinks from appearing in the repo root.
-# Dune may traverse bazel-* symlinks and think the project is duplicated.
-build --symlink_prefix=/
-EOF
-
-  echo "Wrote .bazelrc"
 }
 
 main() {
@@ -264,25 +197,23 @@ main() {
 
   cd "$ROOT"
 
-  install_bazelisk
   check_opam
   check_oxcaml_switch
   handle_deps
   write_env_file
-  write_optional_bazelrc
 
   echo
   echo "Bootstrap complete."
   echo
-  echo "Enable repo-local bazel in this shell:"
+  echo "Select the opam switch for this shell:"
   echo
   echo "  source ./env.sh"
   echo
-  echo "Then use:"
+  echo "Then build, test, and format with dune:"
   echo
-  echo "  bazel run //tools:build"
-  echo "  bazel run //tools:test"
-  echo "  bazel run //tools:fmt"
+  echo "  ./scripts/with-switch.sh dune build"
+  echo "  ./scripts/with-switch.sh dune runtest"
+  echo "  ./scripts/with-switch.sh dune fmt"
 }
 
 main "$@"

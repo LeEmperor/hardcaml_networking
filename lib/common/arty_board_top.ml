@@ -1,6 +1,10 @@
 (*
-  Module: Board_top
+  Module: Arty_board_top
   Arty A7-100T board toplevel — physical-pin interface only.
+
+  Canonical pin contract for the board. This is the *reference* copy: the
+  validation harness reuses Arty_board_top.I/O as its port interface and
+  supplies its own [create]. Keep the pin map here single-source.
 
   Every port in I/O maps 1:1 to a real IOB pin and has an XDC constraint.
   XDC pin locations are noted inline for each signal.

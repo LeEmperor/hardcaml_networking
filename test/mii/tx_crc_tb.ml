@@ -4,6 +4,10 @@ open! Mii_of_hardcaml
 open! Hardcaml_waveterm
 open! Helper_tb_functions
 
+(* Set to [true] to dump the ASCII waveform to stdout at the end of the run.
+   The VCD (waves_tx_crc.vcd) is always written regardless of this flag. *)
+let print_waveform = false
+
 let () =
   print_endline "=== Running MAC TX CRC Testbench ==="
 
@@ -135,6 +139,6 @@ let () =
     sw_fcs3 hw_fcs3 (if hw_fcs3 = sw_fcs3 then "PASS" else "FAIL");
 
   print_endline "\n=== SIMULATION COMPLETE ===";
-  Waveform.print ~display_width:96 waves;
+  if print_waveform then Waveform.print ~display_width:96 waves;
   )
 ;;
