@@ -6,7 +6,8 @@ Written in [HardCaml](https://github.com/janestreet/hardcaml) as a learning proj
 
 Docs for PHY can be found [here](https://www.ti.com/lit/ds/symlink/dp83848j.pdf?ts=1776919033995&ref_url=http%253A%252F%252Fwww.ti.com%252F).
 
-
+A Crude Image of TX path Reception:
+<img width="1280" height="960" alt="image" src="https://github.com/user-attachments/assets/5b268704-c7fa-4f06-a22a-3bd179774248" />
 
 ---
 <br>
