@@ -43,6 +43,7 @@ end)
 module Tx_word = struct
   type 'a t = {
     data : 'a [@bits 8];
+    last : 'a;  (* s_axis tlast, carried alongside its byte so the controller sees it at consume time *)
   } [@@deriving hardcaml]
 end
 
@@ -73,6 +74,7 @@ module I = struct
     (* TX AXI-Stream input *)
     s_axis_tdata  : 'a [@bits 8];
     s_axis_tvalid : 'a;
+    s_axis_tlast  : 'a;  (* marks the final payload byte; drives variable-length TX + zero padding *)
     s_axis_tuser  : 'a;
     tx_start      : 'a;
   } [@@deriving hardcaml]
@@ -280,10 +282,34 @@ let create
     { Tx_fifo.I.clock     = tx_clock;
       clear = tx_reset;
       wr_enable           = inputs.I.s_axis_tvalid;
-      wr_data             = { Tx_word.data = inputs.I.s_axis_tdata };
+      wr_data             = { Tx_word.data = inputs.I.s_axis_tdata; last = inputs.I.s_axis_tlast };
       rd_enable           = wire_tx_fifo_rd_en;
     }
   in
+
+  (* Store-and-forward gate. The TX FIFO is cut-through, so left alone the
+     controller would start draining as soon as the first byte arrives. That is
+     safe for a pre-buffered writer (tx_path_tb writes the whole frame, then
+     pulses tx_start) but races a streaming writer (udp_tx fills the FIFO while
+     the MAC is already reading): the read side overtakes the writer at the
+     header→payload boundary, dropping the first payload byte and its tlast.
+
+     Fix: count whole datagrams resident in the FIFO. A frame is "complete" once
+     its tlast-bearing word is written; it leaves when that word is popped.
+     [tx_frame_ready] holds the controller in Idle until a full frame is buffered
+     (see tx_controller.ml), after which the drain reads only settled bytes and
+     is identical to the pre-buffered case. The 4-bit counter tolerates a couple
+     of queued frames; it never underflows because a frame is always written
+     (inc) before it is drained (dec). *)
+  let tx_spec : Reg_spec.t = Reg_spec.create ~clock:tx_clock ~clear:tx_reset () in
+  let frame_wr_last = inputs.I.s_axis_tvalid &: inputs.I.s_axis_tlast &: ~:(tx_fifo.full) in
+  let frame_rd_last = wire_tx_fifo_rd_en &: tx_fifo.rd_data.last in
+  let frames_buffered =
+    Signal.reg_fb tx_spec ~enable:vdd ~width:4 ~f:(fun c ->
+      c +: uresize frame_wr_last ~width:4 -: uresize frame_rd_last ~width:4)
+    -- "frames_buffered"
+  in
+  let tx_frame_ready = (frames_buffered <>:. 0) -- "tx_frame_ready" in
 
   (* TODO(magic-state-numbers): the TX wiring below compares tx_ctrl.state
      against raw literals. The current Tx_controller encoding is:
@@ -300,13 +326,17 @@ let create
       en                          = en;
       start                       = inputs.I.tx_start;
       fifo_empty                  = ~:(tx_fifo.rd_valid);
+      frame_ready                 = tx_frame_ready;
       dis_ready                   = wire_dis_ready;
+      payload_last                = tx_fifo.rd_data.last;
     }
   in
 
-  (* Pop FIFO and advance controller only when the serializer can accept the next byte *)
+  (* Pop FIFO and advance controller only when the serializer can accept the next
+     byte — but NOT while padding: pad bytes are synthesised, not popped, so the
+     tlast-bearing word stays consumed exactly once. *)
   (* state 6 = Payload (see magic-state-numbers TODO above) *)
-  Signal.(wire_tx_fifo_rd_en <-- (tx_ctrl.state ==:. 6 &: wire_dis_ready));
+  Signal.(wire_tx_fifo_rd_en <-- (tx_ctrl.state ==:. 6 &: wire_dis_ready &: ~:(tx_ctrl.pad)));
 
   let tx_dp =
     Tx_datapath.create scope
@@ -319,6 +349,7 @@ let create
       fcs_byte                     = wire_fcs_byte;
       byte_mux_sel                 = tx_ctrl.byte_mux_sel;
       mac_byte_sel                 = tx_ctrl.mac_byte_sel;
+      pad                          = tx_ctrl.pad;
     }
   in
 
