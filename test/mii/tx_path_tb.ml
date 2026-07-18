@@ -18,13 +18,13 @@
     [22..67] payload:   46 bytes from FIFO
     [68..71] FCS:       CRC-32 over [8..67]
 
-  NOTE: the payload is 46 bytes because tx_controller enforces the standard
-  minimum Ethernet payload (min frame = 14 header + 46 payload + 4 FCS = 64
-  bytes on the wire, excluding preamble/SFD). The Payload state only advances
-  while the FIFO is non-empty, so a sub-minimum payload (< 46 bytes) stalls the
-  FSM in Payload with tx_en stuck high — the RTL has no zero-padding logic yet.
-  Sub-minimum frames are intentionally NOT exercised here; adding them would
-  require padding support in tx_datapath/tx_controller first.
+  NOTE: the payload length is now data-driven — the Payload state ends on
+  s_axis_tlast (asserted with the final payload byte), not a fixed count. The
+  standard 46-byte minimum Ethernet payload (min frame = 14 header + 46 payload
+  + 4 FCS = 64 bytes on the wire, excluding preamble/SFD) is still enforced:
+  tx_controller zero-pads a sub-minimum datagram up to 46 bytes before FCS. This
+  test drives exactly 46 payload bytes, so no padding is exercised (that path is
+  covered separately); it does exercise the tlast-terminated Payload state.
 *)
 
 open! Core
@@ -122,6 +122,7 @@ let () =
     inputs.en           <-- 0;
     inputs.tx_start     <-- 0;
     inputs.s_axis_tvalid <-- 0;
+    inputs.s_axis_tlast  <-- 0;
     inputs.rx_dv        <-- 0;
     cycle ();
     inputs.rx_reset <-- 0;
@@ -135,67 +136,98 @@ let () =
   let exp_src_mac  = [0x02; 0x00; 0x00; 0x00; 0x00; 0x01] in
   let exp_eth_type = [0x99; 0x99] in
 
-  (* 46-byte payload (minimum Ethernet): sequential values 0x01..0x2E for easy inspection *)
-  let payload_bytes = List.init 46 ~f:(fun i -> i + 1) in
+  let exp_preamble = List.init 7 ~f:(fun _ -> 0x55) in
+  let min_payload  = 46 in
 
-  (* SW reference FCS covers everything after preamble, before FCS itself *)
-  let frame_for_crc = exp_dst_mac @ exp_src_mac @ exp_eth_type @ payload_bytes in
-  let expected_fcs  = bytes_of_int ~n:4 (sw_crc frame_for_crc) in
-  printf "SW reference FCS = %02x %02x %02x %02x\n"
-    (List.nth_exn expected_fcs 0) (List.nth_exn expected_fcs 1)
-    (List.nth_exn expected_fcs 2) (List.nth_exn expected_fcs 3);
+  (* ── parametrized frame test ──
+     Drives [data] (the application payload) into the TX FIFO with tlast on the
+     final byte, then checks the reassembled MII frame. The controller is
+     expected to:
+       - transmit exactly [data] when |data| >= 46, or
+       - zero-pad up to 46 bytes when |data| < 46,
+     and to append an FCS computed over dst/src/ethertype + the (padded) payload.
+     Returns true on full PASS. *)
+  let run_frame_test ~label ~data =
+    printf "\n-- [%s] payload = %d bytes --\n" label (List.length data);
+    reset ();
 
-  (* ── test 1: frame structure and payload round-trip ── *)
-  printf "\n-- [test 1] TX frame structure --\n";
-  reset ();
+    (* what the payload region should look like on the wire *)
+    let n_data      = List.length data in
+    let pad_len     = Int.max 0 (min_payload - n_data) in
+    let wire_payload = data @ List.init pad_len ~f:(fun _ -> 0x00) in
+    let plen        = List.length wire_payload in
 
-  (* fill FIFO with payload before asserting tx_start *)
-  List.iter payload_bytes ~f:(fun b ->
-    inputs.s_axis_tdata  <-- b;
-    inputs.s_axis_tvalid <-- 1;
-    cycle ()
-  );
-  inputs.s_axis_tvalid <-- 0;
+    (* SW reference FCS covers dst/src/ethertype + padded payload *)
+    let frame_for_crc = exp_dst_mac @ exp_src_mac @ exp_eth_type @ wire_payload in
+    let expected_fcs  = bytes_of_int ~n:4 (sw_crc frame_for_crc) in
 
-  (* pulse tx_start for one cycle *)
-  inputs.tx_start <-- 1;
-  cycle ();
-  inputs.tx_start <-- 0;
+    (* stage payload into the FIFO, tlast with the last byte *)
+    List.iteri data ~f:(fun i b ->
+      inputs.s_axis_tdata  <-- b;
+      inputs.s_axis_tvalid <-- 1;
+      inputs.s_axis_tlast  <-- (if i = n_data - 1 then 1 else 0);
+      cycle ()
+    );
+    inputs.s_axis_tvalid <-- 0;
+    inputs.s_axis_tlast  <-- 0;
 
-  (* collect the frame off the MII pins *)
-  let frame = collect_frame ~cycle ~outputs ~max_wait:300 in
+    (* pulse tx_start for one cycle *)
+    inputs.tx_start <-- 1;
+    cycle ();
+    inputs.tx_start <-- 0;
 
-  printf "frame length: %d bytes (expect 72)\n" (List.length frame);
-  List.iteri frame ~f:(fun i b -> printf "  [%2d] 0x%02x\n" i b);
+    let frame = collect_frame ~cycle ~outputs ~max_wait:500 in
+    let exp_frame_len = 22 + plen + 4 in
+    printf "frame length: %d bytes (expect %d)\n" (List.length frame) exp_frame_len;
 
-  (* parse and check *)
-  let check_region name offset expected =
-    let n = List.length expected in
-    let got = List.sub frame ~pos:offset ~len:n in (* List.sub slices a list, this returns a subset of it as another List object *)
-    let ok  = List.equal Int.equal got expected in
-    printf "%s @ [%d..%d]: %s\n" name offset (offset + n - 1) (if ok then "PASS" else "FAIL");
-    if not ok then begin
-      printf "  expected: %s\n"
-        (String.concat ~sep:" " (List.map expected ~f:(sprintf "%02x")));
-      printf "  got:      %s\n"
-        (String.concat ~sep:" " (List.map got     ~f:(sprintf "%02x")))
-    end;
+    let check_region name offset expected =
+      let n = List.length expected in
+      let got =
+        if offset + n <= List.length frame
+        then List.sub frame ~pos:offset ~len:n
+        else List.sub frame ~pos:(min offset (List.length frame))
+               ~len:(max 0 (List.length frame - offset))
+      in
+      let ok = List.equal Int.equal got expected in
+      printf "%s @ [%d..%d]: %s\n" name offset (offset + n - 1) (if ok then "PASS" else "FAIL");
+      if not ok then begin
+        printf "  expected: %s\n" (String.concat ~sep:" " (List.map expected ~f:(sprintf "%02x")));
+        printf "  got:      %s\n" (String.concat ~sep:" " (List.map got      ~f:(sprintf "%02x")))
+      end;
+      ok
+    in
+
+    let ok_len      = List.length frame = exp_frame_len in
+    if not ok_len then printf "frame length: FAIL (got %d, expect %d)\n" (List.length frame) exp_frame_len;
+    let ok_preamble = check_region "preamble " 0  exp_preamble in
+    let ok_sfd      = check_region "sfd      " 7  [0xD5]       in
+    let ok_dst      = check_region "dst_mac  " 8  exp_dst_mac  in
+    let ok_src      = check_region "src_mac  " 14 exp_src_mac  in
+    let ok_eth      = check_region "eth_type " 20 exp_eth_type in
+    let ok_payload  = check_region "payload  " 22 wire_payload in
+    let ok_fcs      = check_region "fcs      " (22 + plen) expected_fcs in
+    let ok = ok_len && ok_preamble && ok_sfd && ok_dst && ok_src && ok_eth && ok_payload && ok_fcs in
+    printf "%s: %s\n" label (if ok then "PASS" else "FAIL");
     ok
   in
 
-  let exp_preamble = List.init 7 ~f:(fun _ -> 0x55) in
-
-  let t1_preamble  = check_region "preamble " 0  exp_preamble   in
-  let t1_sfd       = check_region "sfd      " 7  [0xD5]         in
-  let t1_dst_mac   = check_region "dst_mac  " 8  exp_dst_mac    in
-  let t1_src_mac   = check_region "src_mac  " 14 exp_src_mac    in
-  let t1_eth_type  = check_region "eth_type " 20 exp_eth_type   in
-  let t1_payload   = check_region "payload  " 22 payload_bytes  in
-
-  let t1_fcs = check_region "fcs      " 68 expected_fcs in
-
-  let t1_ok = t1_preamble && t1_sfd && t1_dst_mac && t1_src_mac && t1_eth_type && t1_payload && t1_fcs in
-  printf "test 1: %s\n" (if t1_ok then "PASS" else "FAIL");
+  (* sequential lets (not a list literal) so tests run top-to-bottom — OCaml
+     leaves list-element evaluation order unspecified (right-to-left in practice) *)
+  (* exactly the minimum — tlast-terminated, no padding (baseline) *)
+  let r1 = run_frame_test ~label:"test 1: 46B min"   ~data:(List.init 46 ~f:(fun i -> i + 1)) in
+  (* sub-minimum — heavy padding *)
+  let r2 = run_frame_test ~label:"test 2: 18B pad"   ~data:(List.init 18 ~f:(fun i -> 0x80 + i)) in
+  (* one byte — maximal padding (45 zero bytes) *)
+  let r3 = run_frame_test ~label:"test 3: 1B pad"    ~data:[0xAB] in
+  (* one short of the minimum — single zero pad byte (boundary) *)
+  let r4 = run_frame_test ~label:"test 4: 45B pad"   ~data:(List.init 45 ~f:(fun i -> i + 1)) in
+  (* one over the minimum — no padding, variable length above 46 *)
+  let r5 = run_frame_test ~label:"test 5: 47B nopad" ~data:(List.init 47 ~f:(fun i -> i + 1)) in
+  (* comfortably above minimum *)
+  let r6 = run_frame_test ~label:"test 6: 64B nopad" ~data:(List.init 64 ~f:(fun i -> (i * 3) land 0xFF)) in
+  let results = [ r1; r2; r3; r4; r5; r6 ] in
+  printf "\n==== SUMMARY: %d/%d passed ====\n"
+    (List.count results ~f:Fn.id) (List.length results);
 
   print_endline "\n=== SIMULATION COMPLETE ===";
   if print_waveform then Waveform.print ~display_width:100 waves;
