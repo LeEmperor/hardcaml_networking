@@ -23,9 +23,10 @@ module I = struct
     reset : 'a;
     en  : 'a;
 
-    start      : 'a;
-    fifo_empty : 'a;
-    dis_ready  : 'a;  (* tx_byte_disassembler.ready — 1 when it can accept a new byte *)
+    start        : 'a;
+    fifo_empty   : 'a;
+    dis_ready    : 'a;  (* tx_byte_disassembler.ready — 1 when it can accept a new byte *)
+    payload_last : 'a;  (* s_axis tlast travelling with the current FIFO byte — marks the final payload byte *)
   } [@@deriving hardcaml]
 end
 
@@ -36,6 +37,7 @@ module O = struct
     crc_en       : 'a;
     state        : 'a [@bits 3];
     tx_busy      : 'a;  (* 1 while a frame is in flight (Preamble..Fcs), 0 in Idle *)
+    pad          : 'a;  (* 1 while zero-padding a sub-minimum payload — datapath emits 0x00 and the FIFO is not popped *)
   } [@@deriving hardcaml]
 end
 
@@ -43,6 +45,7 @@ module I_Regs = struct
   type 'a t = {
     byte_counter : 'a [@bits 11];
     busy         : 'a;
+    padding      : 'a;  (* 1 once the datagram's real bytes are exhausted but the 46-byte minimum is not yet met *)
     in_preamble  : 'a;
     in_sfd       : 'a;
     in_payload   : 'a;
@@ -99,6 +102,7 @@ let create
         when_ (start) [
           when_ (~:fifo_empty) [
             i_regs.busy <--. 1;
+            i_regs.padding <--. 0;
             rst_counter;
             sm.set_next Preamble;
           ];
@@ -156,15 +160,45 @@ let create
       ];
 
       (* minimum frame 64 bytes (incl FCS, excl preamble/SFD)
-         header: 6+6+2 = 14, FCS: 4 → minimum payload: 64-14-4 = 46 bytes *)
+         header: 6+6+2 = 14, FCS: 4 → minimum payload: 64-14-4 = 46 bytes.
+
+         The payload length is now data-driven: it ends on [payload_last]
+         (s_axis tlast), not a fixed count. A short datagram (< 46 payload
+         bytes) is zero-padded up to the minimum before FCS; a long one runs
+         until tlast. byte_counter is the running payload-byte index (0-based),
+         so index 45 == the 46th byte == exactly the minimum. *)
       Payload, [
-        when_ (~:fifo_empty &: dis_ready) [
-          if_ (i_regs.byte_counter.value ==:. 45) [
-            rst_counter;
-            i_wires.crc_en <--. 1;
-            sm.set_next Fcs;
-          ] [
-            increm_counter;
+        if_ (i_regs.padding.value) [
+          (* real bytes are exhausted (fifo_empty); emit zeros on serializer
+             ready only, until the frame reaches the 46-byte minimum *)
+          when_ (dis_ready) [
+            if_ (i_regs.byte_counter.value ==:. 45) [
+              rst_counter;
+              i_regs.padding <--. 0;
+              i_wires.crc_en <--. 1;
+              sm.set_next Fcs;
+            ] [
+              increm_counter;
+            ];
+          ];
+        ] [
+          (* consume a real FIFO byte when the serializer can take it *)
+          when_ (~:fifo_empty &: dis_ready) [
+            if_ (i.I.payload_last) [
+              (* final byte of the datagram *)
+              if_ (i_regs.byte_counter.value >=:. 45) [
+                (* frame already meets the minimum → straight to FCS *)
+                rst_counter;
+                i_wires.crc_en <--. 1;
+                sm.set_next Fcs;
+              ] [
+                (* sub-minimum → pad the remainder with zeros *)
+                i_regs.padding <--. 1;
+                increm_counter;
+              ];
+            ] [
+              increm_counter;
+            ];
           ];
         ];
       ];
@@ -191,4 +225,5 @@ let create
     crc_en       = i_wires.crc_en.value;
     state        = sm.current;
     tx_busy      = i_regs.busy.value;
+    pad          = i_regs.padding.value;
   }

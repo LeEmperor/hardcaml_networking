@@ -31,6 +31,8 @@ module I = struct
     byte_mux_sel : 'a [@bits 3];
     (* bottom bits of controller byte_counter — selects which MAC/eth-type byte *)
     mac_byte_sel : 'a [@bits 3];
+    (* 1 while the controller is zero-padding a sub-minimum payload *)
+    pad          : 'a;
   } [@@deriving hardcaml]
 end
 
@@ -78,7 +80,9 @@ let create
     | Dst_mac  -> dst_mac_mux
     | Src_mac  -> src_mac_mux
     | Eth_type -> eth_type_mux
-    | Payload  -> i.I.s_axis_tdata
+    (* during padding the FIFO is not popped; emit 0x00 so the CRC covers the
+       zero pad bytes required to reach the 46-byte minimum payload *)
+    | Payload  -> mux2 i.I.pad (of_int_trunc ~width:8 0) i.I.s_axis_tdata
     | Fcs      -> i.I.fcs_byte
   in
 
