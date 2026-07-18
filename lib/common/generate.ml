@@ -11,14 +11,16 @@ open! Signal
      dune exec lib/common/generate.exe -- mac
      dune exec lib/common/generate.exe -- udp
      dune exec lib/common/generate.exe -- validation
+     dune exec lib/common/generate.exe -- udp-validation
 
    Targets:
-     mac         standalone Ethernet MAC              -> hardcaml_eth_mac.v
-     udp         UDP-over-MAC stack                   -> hardcaml_udp_with_mac.v
-     validation  board-level MAC validation harness   -> validation/mac_top_validation_harness.v
+     mac             standalone Ethernet MAC            -> hardcaml_eth_mac.v
+     udp             UDP-over-MAC stack                 -> hardcaml_udp_with_mac.v
+     validation      board MAC validation harness       -> validation/mac_top_validation_harness.v
+     udp-validation  board UDP-over-MAC validation harness -> validation/udp_mac_top_validation_harness.v
 
-   The [validation] target instantiates the same board harness that used to live
-   in validation/generate_validation.exe (now folded in here). *)
+   The board-harness targets instantiate the same tops that used to live in
+   validation/generate_validation.exe (now folded in here). *)
 
 module Udp = Udp.Make (struct
   let bus_width = 8
@@ -32,6 +34,11 @@ module Circ_validation =
   Circuit.With_interface
     (Mac_top_validation_harness.I)
     (Mac_top_validation_harness.O)
+
+module Circ_udp_validation =
+  Circuit.With_interface
+    (Udp_mac_top_validation_harness.I)
+    (Udp_mac_top_validation_harness.O)
 
 (* Emit [circ] as hierarchical Verilog at [path]. [path] is resolved against the
    repo root: DUNE_SOURCEROOT is set by [dune exec] so the RTL always lands at a
@@ -78,9 +85,25 @@ let validation_cmd =
            (Mac_top_validation_harness.create scope)))
 ;;
 
+let udp_validation_cmd =
+  target
+    ~summary:
+      "board UDP-over-MAC validation harness -> validation/udp_mac_top_validation_harness.v"
+    ~build:(fun scope ->
+      emit
+        ~path:"validation/udp_mac_top_validation_harness.v"
+        (Circ_udp_validation.create_exn
+           ~name:"udp_mac_top_validation_harness"
+           (Udp_mac_top_validation_harness.create scope)))
+;;
+
 let () =
   Command_unix.run
     (Command.group
        ~summary:"Hardcaml RTL generators (pick a target)"
-       [ "mac", mac_cmd; "udp", udp_cmd; "validation", validation_cmd ])
+       [ "mac", mac_cmd
+       ; "udp", udp_cmd
+       ; "validation", validation_cmd
+       ; "udp-validation", udp_validation_cmd
+       ])
 ;;

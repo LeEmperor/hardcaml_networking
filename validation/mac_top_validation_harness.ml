@@ -64,48 +64,25 @@ let create
   let rst = Signal.bit i.I.btn ~pos:0 -- "rst" in  (* btn[0]: raw async reset button *)
   let en  = Signal.bit i.I.sw  ~pos:0 -- "en"  in  (* sw[0]:  active-high enable      *)
 
-  (* Per-domain reset synchronizers: btn[0] is a raw asynchronous input, so drop
-     it through a 2-FF chain in each clock domain. Async-assert (the FFs reset to
-     1 the instant btn[0] goes high) and sync-deassert (0 shifts in, so reset
-     releases 2 edges after btn[0] releases). Gives clean reset recovery per
-     domain instead of feeding one async button into three clocks. *)
-  let reset_sync ~clock =
-    let spec = Reg_spec.create ~clock ~reset:rst () in
-    let ff0 = Signal.reg spec ~reset_to:(Bits.one 1) Signal.gnd in
-    Signal.reg spec ~reset_to:(Bits.one 1) ff0
-  in
-  let sys_rst = reset_sync ~clock:i.I.clk100mhz -- "sys_rst" in  (* clk100mhz domain *)
-  let rx_rst  = reset_sync ~clock:i.I.eth_rx_clk -- "rx_rst"  in  (* eth_rx_clk domain *)
-  let tx_rst  = reset_sync ~clock:i.I.eth_tx_clk -- "tx_rst"  in  (* eth_tx_clk domain *)
+  (* Per-domain reset synchronizers (see Board_scaffolding.reset_sync): one 2-FF
+     chain per clock domain, fed from the raw async btn[0]. *)
+  let sys_rst = Board_scaffolding.reset_sync ~clock:i.I.clk100mhz ~async_rst:rst -- "sys_rst" in
+  let rx_rst  = Board_scaffolding.reset_sync ~clock:i.I.eth_rx_clk ~async_rst:rst -- "rx_rst"  in
+  let tx_rst  = Board_scaffolding.reset_sync ~clock:i.I.eth_tx_clk ~async_rst:rst -- "tx_rst"  in
 
   let spec100 = Reg_spec.create ~clock:i.I.clk100mhz ~clear:sys_rst () in
   let spec_tx = Reg_spec.create ~clock:i.I.eth_tx_clk ~clear:tx_rst () in
 
   (* ==== 25 MHz reference clock to the PHY ==== *)
-  (* using a crude fabric divider - jitter is oof but at this speed it doesn't matter *)
-  let clk_div_inst = Clk_div.create scope {
-    Clk_div.I.src_clk = i.I.clk100mhz;
-    rst = sys_rst;
-    en;
-  } in
+  let clk_div_inst = Board_scaffolding.eth_ref_clk ~scope ~clk100mhz:i.I.clk100mhz ~sys_rst ~en in
 
   (* ==== PHY hard reset: hold eth_rstn low ~0.66 ms, then release and hold high ==== *)
-  let phy_rst_cnt =
-    Signal.reg_fb spec100 ~enable:vdd ~width:17
-      ~f:(fun q -> mux2 sys_rst (zero 17) (mux2 (msb q) q (q +:. 1)))
-    -- "phy_rst_cnt"
-  in
-  let phy_ready = Signal.msb phy_rst_cnt -- "dbg_phy_ready" in
+  let phy = Board_scaffolding.phy_hard_reset ~spec100 ~sys_rst in
+  let phy_ready = phy.ready in
 
   (* ==== Heartbeat: 1 Hz pulse toggled into a 0.5 Hz square wave on led0 ==== *)
-  let heartbeat = Second_pulse.create scope {
-    Second_pulse.I.clk = i.I.clk100mhz;
-    rst = sys_rst;
-  } in
-  let heartbeat_toggle =
-    Signal.reg_fb spec100 ~enable:heartbeat.pulse ~width:1 ~f:(fun q -> ~:q)
-    -- "heartbeat_toggle"
-  in
+  let heartbeat = Board_scaffolding.heartbeat ~scope ~clk100mhz:i.I.clk100mhz ~sys_rst ~spec100 in
+  let heartbeat_toggle = heartbeat.toggle in
 
   (* ==== One-shot button-triggered TX ==== *)
   (* A single btn[3] press stages a full payload into the TX FIFO and then fires
@@ -177,10 +154,7 @@ let create
   ]);
 
   (* ── RX drain: pop one byte per second, show low nibble on the plain LEDs ─── *)
-  let rx_drain = Second_pulse.create ~clk_freq:25_000_000 scope {
-    Second_pulse.I.clk = i.I.eth_tx_clk;
-    rst = tx_rst;
-  } in
+  let rx_drain = Board_scaffolding.rx_drain ~scope ~clock:i.I.eth_tx_clk ~reset:tx_rst in
 
   (* ── The MAC ─────────────────────────────────────────────────────────────── *)
   (* Two clock domains now: RX ingest on eth_rx_clk (source-synchronous to the
@@ -214,14 +188,8 @@ let create
      gets a toggle-based pulse synchronizer (a bare 2-FF would drop or stretch a
      single-cycle pulse across the crossing). *)
   let spec_rx = Reg_spec.create ~clock:i.I.eth_rx_clk ~clear:rx_rst () in
-  let sync2_tx x = Signal.reg spec_tx (Signal.reg spec_tx x) in
-  let pulse_sync_tx rx_pulse =
-    (* rx-domain pulse → toggle in rx domain → 2-FF into tx → edge = tx pulse *)
-    let tog = Signal.reg_fb spec_rx ~enable:vdd ~width:1
-                ~f:(fun q -> mux2 rx_pulse (~: q) q) in
-    let tog_tx = Signal.reg spec_tx (Signal.reg spec_tx tog) in
-    tog_tx ^: (Signal.reg spec_tx tog_tx)
-  in
+  let sync2_tx x = Board_scaffolding.sync2 ~spec:spec_tx x in
+  let pulse_sync_tx p = Board_scaffolding.pulse_sync ~src_spec:spec_rx ~dst_spec:spec_tx p in
   let frame_crc_ok_tx = sync2_tx     mac_inst.frame_crc_ok -- "frame_crc_ok_tx" in
   let in_payload_tx   = sync2_tx     mac_inst.in_payload   -- "in_payload_tx"   in
   let frame_done_tx   = pulse_sync_tx mac_inst.frame_done  -- "frame_done_tx"   in
@@ -299,7 +267,7 @@ let create
     uart_rxd_out = vdd;
 
     eth_mdc      = gnd;
-    eth_rstn     = Signal.msb phy_rst_cnt;
+    eth_rstn     = Signal.msb phy.cnt;
     eth_ref_clk  = clk_div_inst.dst_clk;
     eth_tx_en    = mac_inst.tx_en;
     eth_txd      = mac_inst.tx_d;

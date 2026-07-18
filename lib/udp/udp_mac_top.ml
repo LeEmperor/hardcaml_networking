@@ -76,6 +76,13 @@ module O = struct
     (* UDP application backpressure / status *)
     payload_tready : 'a;
     udp_busy       : 'a;
+
+    (* MAC RX status passthrough (rx_clock domain) — surfaced so board harnesses
+       can reuse the MAC validation regs/LED status block. Straight from the
+       internal Mac_top instance; the UDP layer neither consumes nor gates them. *)
+    frame_crc_ok : 'a;  (* holds last RX frame's CRC result; 1 = good *)
+    in_payload   : 'a;  (* RX FSM is in the payload state *)
+    frame_done   : 'a;  (* 1-cycle pulse when an RX frame completes *)
   } [@@deriving hardcaml]
 end
 
@@ -137,5 +144,8 @@ let create ?(rx_fifo_for_sim = false) (scope : Scope.t) (i : _ I.t) : _ O.t =
   ; tx_busy        = mac.tx_busy
   ; payload_tready = udp.payload_tready
   ; udp_busy       = udp.busy
+  ; frame_crc_ok   = mac.frame_crc_ok
+  ; in_payload     = mac.in_payload
+  ; frame_done     = mac.frame_done
   }
 ;;

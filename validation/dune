@@ -8,8 +8,9 @@
 (library
  (name mac_validation)
  (wrapped false)
- (libraries core hardcaml helper_circuits mii_of_hardcaml hardcaml_circuits)
- (modules mac_top_validation_harness mac_top_validation_harness_regs)
+ (libraries core hardcaml helper_circuits mii_of_hardcaml udp_of_hardcaml hardcaml_circuits)
+ (modules board_scaffolding mac_top_validation_harness mac_top_validation_harness_regs
+   udp_mac_top_validation_harness)
  (flags (:standard -w -27-57-33-34-35-40-63-47-26))
  (preprocess
   (pps ppx_hardcaml ppx_jane)))
