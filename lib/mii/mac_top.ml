@@ -287,6 +287,30 @@ let create
     }
   in
 
+  (* Store-and-forward gate. The TX FIFO is cut-through, so left alone the
+     controller would start draining as soon as the first byte arrives. That is
+     safe for a pre-buffered writer (tx_path_tb writes the whole frame, then
+     pulses tx_start) but races a streaming writer (udp_tx fills the FIFO while
+     the MAC is already reading): the read side overtakes the writer at the
+     header→payload boundary, dropping the first payload byte and its tlast.
+
+     Fix: count whole datagrams resident in the FIFO. A frame is "complete" once
+     its tlast-bearing word is written; it leaves when that word is popped.
+     [tx_frame_ready] holds the controller in Idle until a full frame is buffered
+     (see tx_controller.ml), after which the drain reads only settled bytes and
+     is identical to the pre-buffered case. The 4-bit counter tolerates a couple
+     of queued frames; it never underflows because a frame is always written
+     (inc) before it is drained (dec). *)
+  let tx_spec : Reg_spec.t = Reg_spec.create ~clock:tx_clock ~clear:tx_reset () in
+  let frame_wr_last = inputs.I.s_axis_tvalid &: inputs.I.s_axis_tlast &: ~:(tx_fifo.full) in
+  let frame_rd_last = wire_tx_fifo_rd_en &: tx_fifo.rd_data.last in
+  let frames_buffered =
+    Signal.reg_fb tx_spec ~enable:vdd ~width:4 ~f:(fun c ->
+      c +: uresize frame_wr_last ~width:4 -: uresize frame_rd_last ~width:4)
+    -- "frames_buffered"
+  in
+  let tx_frame_ready = (frames_buffered <>:. 0) -- "tx_frame_ready" in
+
   (* TODO(magic-state-numbers): the TX wiring below compares tx_ctrl.state
      against raw literals. The current Tx_controller encoding is:
        0=Idle 1=Preamble 2=Sfd 3=Dst_mac 4=Src_mac 5=Eth_type 6=Payload 7=Fcs
@@ -302,6 +326,7 @@ let create
       en                          = en;
       start                       = inputs.I.tx_start;
       fifo_empty                  = ~:(tx_fifo.rd_valid);
+      frame_ready                 = tx_frame_ready;
       dis_ready                   = wire_dis_ready;
       payload_last                = tx_fifo.rd_data.last;
     }

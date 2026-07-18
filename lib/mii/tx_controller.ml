@@ -25,6 +25,7 @@ module I = struct
 
     start        : 'a;
     fifo_empty   : 'a;
+    frame_ready  : 'a;  (* store-and-forward gate: 1 once a whole tlast-terminated datagram is buffered in the TX FIFO *)
     dis_ready    : 'a;  (* tx_byte_disassembler.ready — 1 when it can accept a new byte *)
     payload_last : 'a;  (* s_axis tlast travelling with the current FIFO byte — marks the final payload byte *)
   } [@@deriving hardcaml]
@@ -43,9 +44,10 @@ end
 
 module I_Regs = struct
   type 'a t = {
-    byte_counter : 'a [@bits 11];
-    busy         : 'a;
-    padding      : 'a;  (* 1 once the datagram's real bytes are exhausted but the 46-byte minimum is not yet met *)
+    byte_counter  : 'a [@bits 11];
+    busy          : 'a;
+    start_pending : 'a;  (* latched start request — lets a streaming source pulse start before its first byte lands in the FIFO *)
+    padding       : 'a;  (* 1 once the datagram's real bytes are exhausted but the 46-byte minimum is not yet met *)
     in_preamble  : 'a;
     in_sfd       : 'a;
     in_payload   : 'a;
@@ -74,8 +76,9 @@ let create
   let clear      = i.I.reset in
   let _en        = i.I.en in
   let start      = i.I.start in
-  let fifo_empty = i.I.fifo_empty -- "fifo_empty" in
-  let dis_ready  = i.I.dis_ready  -- "dis_ready"  in
+  let fifo_empty  = i.I.fifo_empty  -- "fifo_empty"  in
+  let frame_ready = i.I.frame_ready -- "frame_ready" in
+  let dis_ready   = i.I.dis_ready   -- "dis_ready"   in
 
   let rising_edge : Reg_spec.t =
     Reg_spec.create ~clock ~clear ()
@@ -99,13 +102,27 @@ let create
 
     sm.switch ~default:[] [
       Idle, [
+        (* Store-and-forward launch. [start] and the buffered-frame gate arrive
+           independently, in either order:
+           - pre-buffered (tx_path_tb): the whole datagram — tlast included — is
+             written first, then [start] pulses. [frame_ready] is already 1, so
+             this fires the same cycle.
+           - streaming (udp_tx): [start] pulses as the first byte is emitted,
+             long before the datagram finishes arriving. We latch it in
+             [start_pending] and hold in Idle until [frame_ready] rises (the
+             tlast byte has landed in the FIFO), then launch. Waiting for the
+             complete frame is what makes the drain race-free: once we leave
+             Idle every payload byte is already resident, so the FIFO read side
+             never chases an in-flight write. *)
         when_ (start) [
-          when_ (~:fifo_empty) [
-            i_regs.busy <--. 1;
-            i_regs.padding <--. 0;
-            rst_counter;
-            sm.set_next Preamble;
-          ];
+          i_regs.start_pending <--. 1;
+        ];
+        when_ ((start |: i_regs.start_pending.value) &: frame_ready) [
+          i_regs.busy <--. 1;
+          i_regs.padding <--. 0;
+          i_regs.start_pending <--. 0;
+          rst_counter;
+          sm.set_next Preamble;
         ];
       ];
 
