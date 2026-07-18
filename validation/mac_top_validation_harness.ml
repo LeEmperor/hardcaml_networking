@@ -136,6 +136,7 @@ let create
   let sm = Always.State_machine.create (module Tx_trigger_states) ~enable:vdd spec_tx in
   let fill_count = Always.Variable.reg ~enable:vdd ~width:6 spec_tx in
   let tx_tvalid  = Always.Variable.wire ~default:gnd () in
+  let tx_tlast   = Always.Variable.wire ~default:gnd () in
   let tx_tstart  = Always.Variable.wire ~default:gnd () in
 
   (* payload bytes: incrementing 0x01, 0x02, … 0x2E (mirrors tx_path_tb.ml) *)
@@ -155,6 +156,7 @@ let create
         when_ (wire_tx_ready) [
           tx_tvalid <-- vdd;
           if_ (fill_count.value ==:. (payload_len - 1)) [
+            tx_tlast <-- vdd;  (* mark the final payload byte for the length-driven TX FSM *)
             sm.set_next Tx_trigger_states.Fire;
           ] [
             fill_count <-- fill_count.value +:. 1;
@@ -196,6 +198,7 @@ let create
     m_axis_tready   = rx_drain.pulse;
     s_axis_tdata    = fill_byte;
     s_axis_tvalid   = tx_tvalid.value;
+    s_axis_tlast    = tx_tlast.value;
     s_axis_tuser    = gnd;
     tx_start        = tx_tstart.value;
   } in

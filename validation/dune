@@ -2,6 +2,9 @@
 ; Reuses Arty_board_top.I/O (helper_circuits) as its pin contract and drives
 ; Mac_top (mii_of_hardcaml). generate_validation.exe emits the harness RTL.
 
+; The MAC validation harness library. Its RTL is now emitted by the unified
+; generator: `dune exec lib/common/generate.exe -- validation`
+; (the former generate_validation.exe was folded into lib/common/generate.ml).
 (library
  (name mac_validation)
  (wrapped false)
@@ -10,14 +13,3 @@
  (flags (:standard -w -27-57-33-34-35-40-63-47-26))
  (preprocess
   (pps ppx_hardcaml ppx_jane)))
-
-(executables
- (modes byte exe)
- (names generate_validation)
- (libraries core.command core_unix.command_unix core hardcaml jane_rope
-   mii_of_hardcaml mac_validation)
- (modules generate_validation)
- (flags (:standard -w -27-57-33-34-35-40-63-47-26))
- (preprocess
-  (pps ppx_jane))
- (promote))

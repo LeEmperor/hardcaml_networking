@@ -7,9 +7,10 @@
    core 
    hardcaml
    jane_rope
-   mii_of_hardcaml 
+   mii_of_hardcaml
    udp_of_hardcaml
-   uart_of_hardcaml 
+   uart_of_hardcaml
+   mac_validation
   )
  (modules generate)
 
