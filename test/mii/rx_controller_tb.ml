@@ -1,152 +1,121 @@
 open! Core
 open! Hardcaml
 open! Mii_of_hardcaml
-open! Hardcaml_waveterm
-(* open! Bits *)
+
+let () = print_endline "=== Running MAC RX Controller Testbench ==="
+
+module Sim = Cyclesim.With_interface (Rx_controller.I) (Rx_controller.O)
 
 let () =
-  print_endline "=== Running MAC RX Controller Testbench ===";;
+  let scope = Scope.create ~flatten_design:true ~auto_label_hierarchical_ports:true () in
+  let sim = Sim.create (Rx_controller.create scope) in
+  let i = Cyclesim.inputs sim in
+  let o = Cyclesim.outputs sim in
+  let ( <-- ) r v = r := Bits.of_int_trunc ~width:(Bits.width !r) v in
 
-module Waveform = Hardcaml_waveterm.Waveform
-module Sim = Cyclesim.With_interface(Rx_controller.I)(Rx_controller.O)
-(* we hand Sim's namespace a create function and it does the heavy lifting because the shapes were known from the earlier functor call *)
+  let all_ok = ref true in
+  let check name cond =
+    if not cond then all_ok := false;
+    printf "  %-46s: %s\n" name (if cond then "PASS" else "FAIL")
+  in
 
-let create_sim () 
-  =
-  let sim                               = Sim.create Rx_controller.create in
-  (* let waves, sim                        = Waveform.create sim in *)
-  let inputs  : _ Rx_controller.I.t = Cyclesim.inputs sim in
-  let outputs : _ Rx_controller.O.t = Cyclesim.outputs sim in
-  (* (sim, waves, inputs, outputs) *)
-  (sim, inputs, outputs)
-
-  (* Hardcaml.Vcd.wrap : (string -> unit) -> ('i, 'o) Cyclesim.t -> ('i, 'o) Cyclesim.t *)
-  (* 
-     3 args: 
-        1. (string, unit) tuple?
-        2. Cyclesim.t object
-        3. returns Cyclesim.t object
-  *)
-
-let () = 
-  let open Bits in
-  (* let sim, waves, inputs, outputs = create_sim () in *)
-  let sim, inputs, outputs = create_sim () in
-
-  Out_channel.with_file "waves.vcd" ~f:(fun oc ->
-  let sim = Vcd.wrap oc sim in
-
-  (* display helper *)
-
- let cycle () =
+  (* clock + first-high timestamps for each observable output *)
+  let t = ref 0 in
+  let first = Hashtbl.create (module String) in
+  let bit r = Bits.to_bool !r in
+  let record () =
+    let mark name v =
+      if v && not (Hashtbl.mem first name) then Hashtbl.set first ~key:name ~data:!t
+    in
+    mark "in_preamble" (bit o.Rx_controller.O.in_preamble);
+    mark "in_dst_mac" (bit o.in_dst_mac);
+    mark "dst_mac_reg_en" (bit o.dst_mac_reg_en);
+    mark "src_mac_reg_en" (bit o.src_mac_reg_en);
+    mark "eth_type_reg_en" (bit o.eth_type_reg_en);
+    mark "in_payload" (bit o.in_payload)
+  in
+  let cycle () =
     Cyclesim.cycle sim;
-    (* printf "rx_data=%x rx_dv=%d rx_er=%d rx_en=%d\n" *)
-    (*   (Bits.to_int_trunc !(inputs.clk)) *)
-    (*   (Bits.to_int_trunc !(inputs.rst)) *)
-    (*   (Bits.to_int_trunc !(inputs.en)) *)
-    (*   (Bits.to_int_trunc !(inputs.rx_dv)) *)
-    (*   (Bits.to_int_trunc !(inputs.rx_er)) *)
-    (*   (Bits.to_int_trunc !(inputs.rx_data)) *)
-    (*   (Bits.to_int_trunc !(inputs.rx_data_valid)) *)
-  in
-  
-  (* assign helper *)
-  let (<--) r i = r := Bits.of_int_trunc ~width:(Bits.width !r) i in
-
-  (* signal aliases *)
-  let t_rst   = inputs.rst in
-  let t_en    = inputs.en in
-  let t_in    = inputs.rx_data in
-  let t_in_valid = inputs.rx_data_valid in
-  let t_rx_dv = inputs.rx_dv in
-
-  let t_byte_assembler_en =  outputs.byte_assembler_en in
-  (* let t_state_vec = outputs.debug_state_vec in *)
-  (* let t_stable = outputs.debug_stable in *)
-
-  let reset () =
-    t_en  <-- 0;
-    t_rst <-- 1;
-    t_rx_dv <-- 0;
-    cycle ();
-    t_rst <-- 0;
+    record ();
+    incr t
   in
 
-  let send lo hi =
-    t_en <-- 1;
-    t_in_valid <-- 0;
-    t_in <-- lo;
-    cycle ();
-    t_in <-- hi;
-    t_in_valid <-- 1;
-    cycle ();
+  (* one assembled byte per cycle (rx_data_valid pulses like the assembler does) *)
+  (* leaves rx_er untouched so the caller controls it (abort test) *)
+  let send_byte b =
+    i.en <-- 1;
+    i.rx_dv <-- 1;
+    i.rx_data_valid <-- 1;
+    i.rx_data <-- b;
+    cycle ()
   in
 
-  let send_byte byte =
-    let hi = (byte lsl 4) land 0xF in
-    let lo = byte land 0xF in
-    send hi lo;
+  (* reset *)
+  i.reset <-- 1;
+  i.en <-- 0;
+  i.rx_dv <-- 0;
+  i.rx_er <-- 0;
+  i.rx_data_valid <-- 0;
+  i.rx_data <-- 0;
+  cycle ();
+  i.reset <-- 0;
 
-    printf "\n==Byte sent: == %d ==\n" byte;
-    (* slice the byte in half, how do we do more advanced math with a hex value? *)
-  in
+  (* byte_assembler_en tracks en & rx_dv, combinationally *)
+  i.en <-- 1;
+  i.rx_dv <-- 1;
+  Cyclesim.cycle sim;
+  check "byte_assembler_en = en & rx_dv" (bit o.byte_assembler_en);
 
-  let send_byte_oneshot byte =
-    t_en <-- 1;
-    t_in_valid <-- 1;
-    t_in <-- byte;
-    cycle();
-  in
-
-  let idle () =
-    t_en <-- 0;
-    cycle ();
-  in
-
-  (* -- test 1: 0x55 for a while -> expect state=PREAMBLE -- *)
-  printf "\n[test 1] STUFF ";
-  reset ();
-
-  (*PREAMBLE*)
-  send_byte_oneshot 0x55;
-  send_byte_oneshot 0x55;
-  send_byte_oneshot 0x55;
-  send_byte_oneshot 0x55;
-
-  (* SFD *)
-  send_byte_oneshot 0xD5;
-
-  (* DST MAC *)
-  for i = 0x20 to 0x26 do
-    send_byte_oneshot i;
+  (* drive a full header + payload *)
+  for _ = 1 to 6 do send_byte 0x55 done;   (* preamble *)
+  send_byte 0xD5;                           (* SFD *)
+  for _ = 1 to 6 do send_byte 0x11 done;   (* dst mac *)
+  for _ = 1 to 6 do send_byte 0x22 done;   (* src mac *)
+  send_byte 0x45; send_byte 0x21;           (* ethertype *)
+  let payload_emit = ref true in
+  let payload_sel  = ref true in
+  for _ = 1 to 8 do
+    send_byte 0x77;                          (* payload *)
+    if bit o.in_payload then begin
+      if not (bit o.emit_payload) then payload_emit := false;
+      if not (bit o.payload_sel)  then payload_sel  := false
+    end
   done;
 
-  (* SRC MAC*)
-  for i = 0x30 to 0x36 do
-    send_byte_oneshot i;
-  done;
+  (* error mid-payload aborts back to idle (in_payload drops next state) *)
+  i.rx_er <-- 1;
+  send_byte 0x77;
+  send_byte 0x77;
+  i.rx_er <-- 0;
+  check "rx_er aborts payload (in_payload low after error)" (not (bit o.in_payload));
 
-  (* ETH_TYPE *)
-  send_byte_oneshot 0x11;
-  send_byte_oneshot 0x22;
+  let seen name = Hashtbl.mem first name in
+  let at name = Hashtbl.find_exn first name in
+  printf "\n  first-high cycles: %s\n"
+    (String.concat ~sep:"  "
+       (List.map
+          [ "in_preamble"; "in_dst_mac"; "dst_mac_reg_en"; "src_mac_reg_en"
+          ; "eth_type_reg_en"; "in_payload" ]
+          ~f:(fun n -> sprintf "%s=%s" n (if seen n then Int.to_string (at n) else "-"))));
 
-  (* PAYLOAD *)
-  for i = 0x01 to 0x40 do
-    send_byte_oneshot i;
-  done;
+  printf "\n[assertions]\n";
+  check "in_preamble asserted" (seen "in_preamble");
+  check "in_dst_mac asserted" (seen "in_dst_mac");
+  check "dst_mac_reg_en asserted" (seen "dst_mac_reg_en");
+  check "src_mac_reg_en asserted" (seen "src_mac_reg_en");
+  check "eth_type_reg_en asserted" (seen "eth_type_reg_en");
+  check "in_payload asserted" (seen "in_payload");
+  check "order: preamble < dst < payload"
+    (seen "in_preamble" && seen "in_dst_mac" && seen "in_payload"
+     && at "in_preamble" < at "in_dst_mac"
+     && at "in_dst_mac" < at "in_payload");
+  check "order: dst_en < src_en < eth_en"
+    (at "dst_mac_reg_en" < at "src_mac_reg_en"
+     && at "src_mac_reg_en" < at "eth_type_reg_en");
+  check "payload: emit_payload high throughout" !payload_emit;
+  check "payload: payload_sel high throughout" !payload_sel;
 
-  (* drive frame finish *)
-  t_rx_dv <-- 1;
-
-  (* tail cycle *)
-  for i = 0 to 10 do
-    cycle();
-  done;
-
-  idle ();
-  cycle();
-
-  print_endline "\n=== SIMULATION COMPLETE ===";
-  )
+  printf "\n=== %s ===\n" (if !all_ok then "ALL PASS" else "FAILURES PRESENT");
+  print_endline "=== SIMULATION COMPLETE ===";
+  if not !all_ok then exit 1
 ;;
-
