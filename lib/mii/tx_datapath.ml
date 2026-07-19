@@ -45,6 +45,7 @@ module O = struct
 end
 
 let create
+  ?(ethertype = 0x9999)
   (scope : Scope.t)
   (i) : _ O.t
   =
@@ -63,10 +64,11 @@ let create
   let const_src_mac = List.map ~f:(of_int_trunc ~width:8)
     [0x02; 0x00; 0x00; 0x00; 0x00; 0x01]
   in
-  (* ethertype 0x9999: custom/unknown — kernel ignores payload, easy to sniff with
-     tcpdump -i <iface> ether proto 0x9999 *)
+  (* ethertype parameterized via [?ethertype] (default 0x9999, a custom/unknown
+     type the kernel ignores — easy to sniff with `tcpdump -i <iface> ether
+     proto 0x9999`). IPv4 stacks pass 0x0800 so a real host accepts the frame. *)
   let const_eth_type = List.map ~f:(of_int_trunc ~width:8)
-    [0x99; 0x99]
+    [ (ethertype lsr 8) land 0xff; ethertype land 0xff ]
   in
 
   let dst_mac_mux  = mux mac_byte_sel const_dst_mac in

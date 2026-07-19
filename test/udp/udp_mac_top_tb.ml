@@ -12,7 +12,7 @@
     [7]      SFD      : 0xD5                 (MAC)
     [8..13]  dst_mac  : ff ff ff ff ff ff    (MAC, hardcoded)
     [14..19] src_mac  : 02 00 00 00 00 01    (MAC, hardcoded)
-    [20..21] eth_type : 0x9999               (MAC, hardcoded)
+    [20..21] eth_type : 0x0800 (IPv4)        (MAC, via ~ethertype:0x0800)
     [22..]   payload  : the IPv4/UDP datagram Udp_tx produced (IP hdr ++ UDP hdr
                         ++ app data), zero-padded by the MAC to the 46-byte
                         Ethernet minimum when the datagram is shorter
@@ -98,7 +98,7 @@ let bytes_of_int ~n x = List.init n ~f:(fun i -> (x lsr (8 * i)) land 0xFF)
 let exp_preamble = List.init 7 ~f:(fun _ -> 0x55)
 let exp_dst_mac = [ 0xFF; 0xFF; 0xFF; 0xFF; 0xFF; 0xFF ]
 let exp_src_mac = [ 0x02; 0x00; 0x00; 0x00; 0x00; 0x01 ]
-let exp_eth_type = [ 0x99; 0x99 ]
+let exp_eth_type = [ 0x08; 0x00 ]  (* IPv4 — Udp_mac_top drives Mac_top ~ethertype:0x0800 *)
 let min_payload = 46
 
 let () =

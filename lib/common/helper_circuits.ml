@@ -40,3 +40,7 @@ let rising_edge_delayed spec ~n_cycles x =
   delay_by spec ~n_cycles rose
 ;;
 
+let const8  v = of_int_trunc ~width:8 v ;;
+let hi16    w = select w ~high:15 ~low:8  ;;     (* MSB-first on the wire *)
+let lo16    w = select w ~high:7 ~low:0   ;;
+

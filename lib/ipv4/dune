@@ -1,0 +1,9 @@
+(library
+ (name ipv4_of_hardcaml)
+ ; (modules ipv4_rx ipv4_tx)
+ (libraries core hardcaml helper_circuits hardcaml_circuits)
+ (preprocess
+  (pps ppx_hardcaml ppx_jane))
+ (flags (:standard -w -27-57-33-34-35-40-63-47-26))
+ )
+

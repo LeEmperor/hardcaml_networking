@@ -127,6 +127,7 @@ end
 
 let create
   ?(rx_fifo_for_sim = false)
+  ?(ethertype = 0x9999)
   (scope : Scope.t )
   inputs : (_ O.t)
   =
@@ -350,7 +351,7 @@ let create
   Signal.(wire_tx_fifo_rd_en <-- (tx_ctrl.state ==:. 6 &: wire_dis_ready &: ~:(tx_ctrl.pad)));
 
   let tx_dp =
-    Tx_datapath.create scope
+    Tx_datapath.create ~ethertype scope
     { Tx_datapath.I.clock          = tx_clock;
       reset = tx_reset;
       en                           = en;

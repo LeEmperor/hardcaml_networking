@@ -4,35 +4,52 @@
 
   Module: Udp_mac_top
 
-  Composition layer: a UDP/IPv4 TX generator (Udp_tx) stacked on top of the MII
-  Ethernet MAC (Mac_top). This module owns the *wiring*, so the layering stays
-  one-directional:
+  Composition layer: a UDP (L4) + IPv4 (L3) TX stack stacked on top of the MII
+  Ethernet MAC (L2, Mac_top). This module owns the *wiring*, so the layering
+  stays one-directional:
 
-      Udp_tx  ─(Ethernet-payload AXI-S)→  Mac_top.s_axis  ─→ MII PHY
+      Udp_tx ─(UDP datagram + meta)→ Ipv4_tx ─(Eth payload AXI-S)→ Mac_top.s_axis ─→ PHY
 
-  The MAC does NOT depend on UDP — [mii_of_hardcaml] has no knowledge of this
-  library. The MAC's s_axis sink can equally be driven by a raw-frame source,
-  a different protocol layer, or nothing. "Including a UDP stack" is therefore a
-  question of *what you instantiate around the MAC*, not a compile-time flag on
-  the MAC itself — hence composition here rather than a Config functor on
-  Mac_top. (If you later want one buildable top that can include/exclude UDP,
-  make THIS module the functor; leave Mac_top plain.)
+  Each layer only knows the one below it:
+    - Udp_tx hands its datagram bytes + {ip_start, l4_length, protocol} to Ipv4_tx.
+    - Ipv4_tx prepends the IPv4 header and drives Mac_top's s_axis.
+    - The MAC knows nothing about IP or UDP — [mii_of_hardcaml] has no dependency
+      on this library or on ipv4_of_hardcaml. "Including a UDP/IP stack" is a
+      question of *what you instantiate around the MAC*, not a flag on the MAC.
+
+  Backpressure flows the other way through two wire stubs that break the
+  combinational loops: MAC.s_axis_tready → Ipv4_tx.mac_tready, and
+  Ipv4_tx.l4_tready → Udp_tx.l4_tready.
 
   Everything here lives in the tx_clock domain (the MAC's TX side); the RX path
   is passed straight through untouched.
 
-  CAVEAT: Mac_top's tx_datapath still emits ethertype 0x9999. A real IPv4 host
-  wants 0x0800 — parameterize the MAC's ethertype (or the datapath constants)
-  before expecting a kernel to accept these frames. For loopback/tcpdump bring-up
-  0x9999 is fine.
+  Endpoints are elaboration-time constants (functor Config): src/dst IP live in
+  the IPv4 layer, src/dst port in the UDP layer. The MAC emits ethertype 0x0800
+  so a real IPv4 host accepts the frame.
 *)
 
 open! Core
 open! Hardcaml
 open! Signal
 open! Mii_of_hardcaml
+open! Ipv4_of_hardcaml
 
 let () = Stdio.print_endline "=== Imported UDP+MAC Top ==="
+
+(* fixed endpoints for the first bring-up *)
+module Udp_cfg = struct
+  let src_port = 0x1234
+  let dst_port = 0x1235
+end
+
+module Ip_cfg = struct
+  let src_ip = [ 192; 168; 1; 10 ] (* 4 bytes, network order *)
+  let dst_ip = [ 192; 168; 1; 1 ]
+end
+
+module Udp = Udp_tx.Make (Udp_cfg)
+module Ip  = Ipv4_tx.Make (Ip_cfg)
 
 module I = struct
   type 'a t = {
@@ -87,24 +104,43 @@ module O = struct
 end
 
 let create ?(rx_fifo_for_sim = false) (scope : Scope.t) (i : _ I.t) : _ O.t =
-  (* break the udp_tx <-> mac backpressure combinational loop with a wire stub *)
-  let wire_mac_tready = Signal.wire 1 in
+  (* break the two backpressure combinational loops with wire stubs *)
+  let wire_mac_tready = Signal.wire 1 in  (* MAC.s_axis_tready  -> Ipv4_tx.mac_tready *)
+  let wire_l4_tready  = Signal.wire 1 in  (* Ipv4_tx.l4_tready  -> Udp_tx.l4_tready   *)
 
+  (* L4: UDP header + app payload *)
   let udp =
-    Udp_tx.create scope
-      { Udp_tx.I.clock  = i.tx_clock
+    Udp.create scope
+      { Udp.I.clock    = i.tx_clock
       ; reset          = i.tx_reset
       ; en             = i.en
       ; start          = i.tx_start
       ; payload_len    = i.payload_len
       ; payload_tdata  = i.payload_tdata
       ; payload_tvalid = i.payload_tvalid
-      ; mac_tready     = wire_mac_tready
+      ; l4_tready      = wire_l4_tready
       }
   in
 
+  (* L3: prepend the IPv4 header to the UDP datagram *)
+  let ip =
+    Ip.create scope
+      { Ip.I.clock  = i.tx_clock
+      ; reset       = i.tx_reset
+      ; en          = i.en
+      ; start       = udp.ip_start
+      ; l4_length   = udp.l4_length
+      ; protocol    = udp.protocol
+      ; l4_tdata    = udp.m_tdata
+      ; l4_tvalid   = udp.m_tvalid
+      ; l4_tlast    = udp.m_tlast
+      ; mac_tready  = wire_mac_tready
+      }
+  in
+
+  (* L2: Ethernet framing + FCS. ethertype 0x0800 = IPv4. *)
   let mac =
-    Mac_top.create ~rx_fifo_for_sim scope
+    Mac_top.create ~rx_fifo_for_sim ~ethertype:0x0800 scope
       { Mac_top.I.rx_clock = i.rx_clock
       ; rx_reset      = i.rx_reset
       ; tx_clock      = i.tx_clock
@@ -114,24 +150,22 @@ let create ?(rx_fifo_for_sim = false) (scope : Scope.t) (i : _ I.t) : _ O.t =
       ; rx_er         = i.rx_er
       ; rx_data       = i.rx_data
       ; m_axis_tready = i.m_axis_tready
-      (* the wiring: UDP byte stream → MAC's Ethernet-payload sink.
-         udp_tx pulses tx_start as it emits its first byte; the MAC latches that
-         in start_pending and holds transmission until the whole datagram is
+      (* the wiring: IPv4 byte stream → MAC's Ethernet-payload sink.
+         ip_tx pulses tx_start as it opens the frame; the MAC latches that in
+         start_pending and holds transmission until the whole datagram is
          buffered (store-and-forward — see the frames_buffered gate in
-         mac_top.ml). That resolves the earlier cut-through race in which the
-         MAC's read side overtook the streaming writer at the header→payload
-         boundary and dropped the first payload byte. The full frame — Ethernet
-         framing, IPv4/UDP header, streamed app payload, MAC zero-padding, and
-         FCS — is now emitted byte-perfect (verified end-to-end in
-         udp_mac_top_tb.ml). *)
-      ; s_axis_tdata  = udp.m_tdata
-      ; s_axis_tvalid = udp.m_tvalid
-      ; s_axis_tlast  = udp.m_tlast
+         mac_top.ml). The full frame — Ethernet framing, IPv4 header, UDP header,
+         streamed app payload, MAC zero-padding, and FCS — is emitted byte-perfect
+         (verified end-to-end in udp_mac_top_tb.ml). *)
+      ; s_axis_tdata  = ip.m_tdata
+      ; s_axis_tvalid = ip.m_tvalid
+      ; s_axis_tlast  = ip.m_tlast
       ; s_axis_tuser  = Signal.gnd
-      ; tx_start      = udp.tx_start
+      ; tx_start      = ip.tx_start
       }
   in
 
+  Signal.(wire_l4_tready  <-- ip.l4_tready);
   Signal.(wire_mac_tready <-- mac.s_axis_tready);
 
   { O.m_axis_tdata  = mac.m_axis_tdata
