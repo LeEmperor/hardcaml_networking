@@ -1,18 +1,22 @@
-(* 
+(*
   Bohdan Purtell
   University of Florida
 
   Module: Rx_controller
-  This module serves as an FSM controller for the receive path of my Hardcaml 
-  ethernet MAC.
+  FSM controller for the receive path of the Hardcaml Ethernet MAC. Walks the
+  frame header (preamble/SFD → dst → src → ethertype → payload) and drives the
+  datapath's register-enable / payload-select control lines.
+
+  NB: SFD (0xD5) is detected inside the PREAMBLE state rather than a dedicated
+  state, and there is no FCS state — the trailing CRC is stripped in the datapath
+  pipeline, not the controller. (Full unification with Common_types.States is
+  deferred for that reason; see rx_controller_intf.ml.)
 *)
 
 open Core
 open Hardcaml
 open Signal
-open Always
-open Variable
-open Helper_circuits
+open Helper_circuits (* in theory things like increm_counter can be thrown in here? *)
 
 let () =
   Stdio.print_endline "=== Imported MAC RX Controller ==="
@@ -27,7 +31,7 @@ module I = struct
     (* control lines  *)
     rx_dv : 'a;
     rx_er : 'a;
-    
+
     (* data line -> rxd presents Preamble/SFD *)
     rx_data       : 'a [@bits 8];
     rx_data_valid : 'a;
@@ -69,218 +73,175 @@ module States = struct
     | SRC_MAC
     | ETH_TYPE
     | PAYLOAD
-    | DONE 
   [@@deriving sexp_of, compare ~localize, enumerate]
 end
 
-let create 
+(* Registered controls. The datapath reg-enables are pipelined one cycle behind
+   the state (a Moore output) so they line up with the byte assembler's
+   one-cycle-late byte_valid. mac_byte_count paces the multi-byte header states. *)
+module I_Regs = struct
+  type 'a t = {
+    mac_byte_count  : 'a [@bits 3];
+    dst_mac_reg_en  : 'a;
+    src_mac_reg_en  : 'a;
+    eth_type_reg_en : 'a;
+  } [@@deriving hardcaml]
+end
+
+(* Combinational (Moore) status/select lines — default 0, raised in-state. *)
+module I_Wires = struct
+  type 'a t = {
+    payload_sel  : 'a;
+    is_preamble  : 'a;
+    is_dst_mac   : 'a;
+    is_payload   : 'a;
+    emit_payload : 'a;
+  } [@@deriving hardcaml]
+end
+
+let create
   (scope : Scope.t)
-  (inputs) : (_ O.t)
+  (i : _ I.t) : _ O.t
   =
   let open Always in
-  let open Variable in
-
-  let rising_edge : Reg_spec.t = 
-    Reg_spec.create ~clock:inputs.I.clock ~clear:inputs.I.reset ()
-  in
-
-  (* state machine *)
+  let rising_edge : Reg_spec.t = Reg_spec.create ~clock:i.clock ~clear:i.reset () in
   let sm = State_machine.create (module States) ~enable:vdd rising_edge in
 
-  (* negates *)
-  let not_rx_dv = (~: (inputs.I.rx_dv) ) in
-  let not_rx_er = (~: (inputs.I.rx_er) ) in
+  let r = I_Regs.Of_always.reg ~enable:vdd rising_edge in
+  I_Regs.Of_always.apply_names ~prefix:"reg_" ~naming_op:(Scope.naming scope) r;
 
-  (* internal aliases *)
-  let rx_er         = inputs.I.rx_er in
-  let rx_dv         = inputs.I.rx_dv in
-  let in_data       = inputs.I.rx_data in
-  let en            = inputs.I.en in
-  let valid         = inputs.I.rx_data_valid in
-  let stable        = (rx_dv &: not_rx_er &: en) in
+  let w = I_Wires.Of_always.wire Signal.zero in
+  I_Wires.Of_always.apply_names ~prefix:"wire_" ~naming_op:(Scope.naming scope) w;
 
-  (* this would like to be a wire instead? essentially a mux *)
-  (* let reg_payload_sel   = reg ~enable:vdd ~width:1 rising_edge in *)
-  (* let payload_sel   = reg ~enable:vdd ~width:1 rising_edge in *)
-  let payload_sel   = Always.Variable.wire ~default:gnd () in
-  let is_preamble   = Always.Variable.wire ~default:gnd () in
-  let is_dst_mac    = Always.Variable.wire ~default:gnd () in
-  let is_payload    = Always.Variable.wire ~default:gnd () in
+  (* aliases *)
+  let rx_er   = i.rx_er in
+  let rx_dv   = i.rx_dv in
+  let in_data = i.rx_data in
+  let en      = i.en in
+  let valid   = i.rx_data_valid in
+  let stable  = rx_dv &: ~:rx_er &: en in
 
-  (* const params *)
-  let const_0xD5 = of_int_trunc ~width:8 0xD5 in
   let const_0x55 = of_int_trunc ~width:8 0x55 in
+  let const_0xD5 = of_int_trunc ~width:8 0xD5 in
 
-  (* internal regs *)
-  let mac_byte_count    = reg ~enable:vdd ~width:3 rising_edge in
-  let dst_mac_reg_en    = reg ~enable:vdd ~width:1 rising_edge in
-  let src_mac_reg_en    = reg ~enable:vdd ~width:1 rising_edge in
-  let eth_type_reg_en   = reg ~enable:vdd ~width:1 rising_edge in
-  (* let payload_out_valid = reg ~enable:vdd ~width:1 rising_edge in *)
-  let payload_out_valid = Always.Variable.wire ~default:(Signal.zero 1) () in
+  (* helper functions *)
+  let byte_counter_is (n : int) =
+    r.mac_byte_count.value ==:. n
+  in
 
-  let dbg_mac_byte_count = mac_byte_count.value -- "dbg_mac_byte_count" in
-  let dbg_dst_mac_reg_en = dst_mac_reg_en.value -- "dbg_dst_mac_reg_en" in
-  let dbg_src_mac_reg_en = src_mac_reg_en.value -- "dbg_dst_src_reg_en" in
-  let state_vec = Always.Variable.wire ~default:(Signal.zero 3) () in
-  let dbg_state_vec = state_vec.value -- "state_vec" in
-  let dbg_emit_payload = payload_out_valid.value -- "dbg_emit_payload_controller" in
+  let increm_byte_counter = r.mac_byte_count <-- r.mac_byte_count.value +:. 1 in
 
-  (* highkey lost what this does *)
-  let bruh3 = (Always.Variable.wire ~default:(Signal.zero 3) ()).value in
-
-  (* rising edge detect on dv for the crc_valid strobe line *)
-  let fcs_present = (rising_edge_delayed rising_edge ~n_cycles:1 inputs.I.rx_dv) -- "dbg_fcs_present" in
-
-  (* i swear this can be automated *)
-  let keep = reduce ~f:(|:) (
-    (bits_lsb dbg_mac_byte_count) @ 
-    (bits_lsb dbg_dst_mac_reg_en) @
-    (bits_lsb dbg_src_mac_reg_en) @
-    (bits_lsb dbg_state_vec) @
-    (bits_lsb dbg_emit_payload) @
-    (bits_lsb fcs_present)
-  ) in
-
-  (* let (<--) r i = r := Bits.of_int_trunc ~width:(Bits.width !r) i in *)
+  (* rising edge of dv, delayed 1 cycle: the CRC-valid strobe helper for mac_top *)
+  let fcs_present = rising_edge_delayed rising_edge ~n_cycles:1 i.rx_dv -- "fcs_present" in
 
   compile [
-    (* default values *)
-    payload_sel     <--. 0;
-    dst_mac_reg_en  <--. 0;
-    src_mac_reg_en  <--. 0;
-    eth_type_reg_en <--. 0;
-    payload_out_valid <--. 0;
-    payload_sel <--. 0;
+    (* registered reg-enable defaults (wires default to 0 via Of_always.wire) *)
+    r.dst_mac_reg_en <--. 0;
+    r.src_mac_reg_en <--. 0;
+    r.eth_type_reg_en <--. 0;
 
-    state_vec <-- sm.current;
-
-    (* moore assigments *)
+    (* Moore outputs per state *)
     sm.switch ~default:[] [
-      PREAMBLE, [
-        is_preamble <--. 1;
-      ];
-      DST_MAC, [
-        is_dst_mac <--. 1;
-        dst_mac_reg_en <--. 1;
-      ];
-      SRC_MAC, [
-        src_mac_reg_en <--. 1;
-      ];
-      ETH_TYPE, [
-        eth_type_reg_en <--. 1;
-      ];
-      PAYLOAD, [
-        is_payload <--. 1;
-        payload_sel <--. 1;
-        payload_out_valid <--. 1;
-      ];
+      PREAMBLE, [ w.is_preamble <--. 1 ];
+      DST_MAC,  [ w.is_dst_mac <--. 1; r.dst_mac_reg_en <--. 1 ];
+      SRC_MAC,  [ r.src_mac_reg_en <--. 1 ];
+      ETH_TYPE, [ r.eth_type_reg_en <--. 1 ];
+      PAYLOAD,  [ w.is_payload <--. 1; w.payload_sel <--. 1; w.emit_payload <--. 1 ];
     ];
 
-    (* next state logic *)
-    when_ (valid) [
-      sm.switch ~default:[sm.set_next IDLE] [
+    (* next-state logic, only on a valid assembled byte *)
+    when_ valid [
+      sm.switch ~default:[ sm.set_next IDLE ] [
+        IDLE, [
+          if_ stable [ sm.set_next PREAMBLE ] [ sm.set_next IDLE ];
+        ];
 
-      IDLE, [
-        if_ (stable) [sm.set_next PREAMBLE] [sm.set_next IDLE]
-      ];
-      
-      PREAMBLE, [
-        if_ (stable) [
-          Always.switch in_data [
-            const_0x55, [sm.set_next PREAMBLE];
-            const_0xD5, [
-              sm.set_next DST_MAC; 
+        PREAMBLE, [
+          if_ stable [
+            Always.switch in_data [
+              const_0x55, [ sm.set_next PREAMBLE ];
+              const_0xD5, [ sm.set_next DST_MAC ];
             ];
-          ]
-        ] [
-          sm.set_next IDLE;
-        ]
-      ];
-
-      DST_MAC, [
-        if_ (stable) [
-          if_ (mac_byte_count.value ==: of_int_trunc ~width:3 5) [
-            mac_byte_count <-- of_int_trunc ~width:3 0;
-            sm.set_next SRC_MAC;
           ] [
-            mac_byte_count <-- mac_byte_count.value +:. 1;
-            sm.set_next DST_MAC;
+            sm.set_next IDLE;
           ];
-        ] [
-          sm.set_next IDLE;
-        ]
-      ];
-
-      SRC_MAC, [
-        if_ (stable) [
-          if_ (mac_byte_count.value ==: of_int_trunc ~width:3 5) [
-            mac_byte_count <-- of_int_trunc ~width:3 0;
-            (* very odd timing issue that requires the register enable to be high one longer cycle *)
-            (* might be more easily remediable with a moore approach, but why doesnt the mealy work? *)
-            (* my thought is that the byte valid is a moore based assignment from the byte assembler, therefore *)
-            (* my assignments following have to be in the moore domain *)
-            sm.set_next ETH_TYPE;
-          ] [
-            (* mac_byte_count <-- mac_byte_count.value +: (of_int_trunc ~width:3 1); *)
-            mac_byte_count <-- mac_byte_count.value +:. 1;
-            sm.set_next SRC_MAC;
-          ];
-        ] [
-          sm.set_next IDLE;
-        ]
-      ];
-
-      ETH_TYPE, [
-        if_ (stable) [
-          if_ (mac_byte_count.value ==: of_int_trunc ~width:3 1) [
-            mac_byte_count <-- of_int_trunc ~width:3 0;
-            sm.set_next PAYLOAD;
-          ] [
-            mac_byte_count <-- mac_byte_count.value +:. 1;
-            sm.set_next ETH_TYPE;
-          ];
-        ] [
-          sm.set_next IDLE;
         ];
-      ];
 
-      PAYLOAD, [
-        (* priority handle err and datavalid separately *)
-        if_ (rx_er) [
-          sm.set_next IDLE;
-        ] [
-          if_ (rx_dv) [
-            (* keep taking payload *)
-            sm.set_next PAYLOAD;
+        DST_MAC, [
+          if_ stable [
+            (* if_ (r.mac_byte_count.value ==:. 5) [ *)
+            if_ (byte_counter_is 5) [
+              r.mac_byte_count <--. 0;
+              sm.set_next SRC_MAC;
+            ] [
+              r.mac_byte_count <-- r.mac_byte_count.value +:. 1;
+              sm.set_next DST_MAC;
+            ];
           ] [
-            (* payload finished *)
-            sm.set_next PREAMBLE;
+            sm.set_next IDLE;
+          ];
+        ];
+
+        SRC_MAC, [
+          if_ stable [
+            if_ (r.mac_byte_count.value ==:. 5) [
+              r.mac_byte_count <--. 0;
+              sm.set_next ETH_TYPE;
+            ] [
+              r.mac_byte_count <-- r.mac_byte_count.value +:. 1;
+              sm.set_next SRC_MAC;
+            ];
+          ] [
+            sm.set_next IDLE;
+          ];
+        ];
+
+        ETH_TYPE, [
+          if_ stable [
+            if_ (r.mac_byte_count.value ==:. 1) [
+              r.mac_byte_count <--. 0;
+              sm.set_next PAYLOAD;
+            ] [
+              r.mac_byte_count <-- r.mac_byte_count.value +:. 1;
+              sm.set_next ETH_TYPE;
+            ];
+          ] [
+            sm.set_next IDLE;
+          ];
+        ];
+
+        PAYLOAD, [
+          (* priority: error aborts; otherwise stay while dv holds, else frame end *)
+          if_ rx_er [
+            sm.set_next IDLE;
+          ] [
+            if_ rx_dv [ sm.set_next PAYLOAD ] [ sm.set_next PREAMBLE ];
           ];
         ];
       ];
+    ];
+  ];
 
-      DONE, [sm.set_next DONE];
-    ] (* sm.switch[] *)
-  ]   (* when_ (valid)[] *)
-  ];  (* compile[] *)
+  let keep =
+    reduce ~f:( |: )
+      (bits_lsb r.mac_byte_count.value
+       @ bits_lsb r.dst_mac_reg_en.value
+       @ bits_lsb r.src_mac_reg_en.value
+       @ bits_lsb w.emit_payload.value
+       @ bits_lsb fcs_present)
+  in
 
-  {
-    byte_assembler_en     = inputs.I.en &: inputs.I.rx_dv;
-
-    (* byte assembler is how we branch, therefore it should be on when we are also on, with WE = controller*)
-    dst_mac_reg_en        = dst_mac_reg_en.value;
-    src_mac_reg_en        = src_mac_reg_en.value;
-    eth_type_reg_en       = eth_type_reg_en.value;
-
-    payload_sel           = payload_sel.value;
-    emit_payload          = payload_out_valid.value;
-    fcs_present           = fcs_present;
-
-    in_preamble           = is_preamble.value;
-    in_dst_mac            = is_dst_mac.value;
-    in_payload            = is_payload.value;
-
-    keep = keep;
+  { O.
+    byte_assembler_en = i.en &: i.rx_dv;
+    dst_mac_reg_en    = r.dst_mac_reg_en.value;
+    src_mac_reg_en    = r.src_mac_reg_en.value;
+    eth_type_reg_en   = r.eth_type_reg_en.value;
+    payload_sel       = w.payload_sel.value;
+    emit_payload      = w.emit_payload.value;
+    fcs_present;
+    in_preamble       = w.is_preamble.value;
+    in_dst_mac        = w.is_dst_mac.value;
+    in_payload        = w.is_payload.value;
+    keep;
   }
 ;;
