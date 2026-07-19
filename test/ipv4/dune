@@ -1,5 +1,5 @@
 (executables
- (names ipv4_tx_tb)
+ (names ipv4_tx_tb ipv4_rx_tb)
  (libraries core hardcaml ipv4_of_hardcaml hardcaml_waveterm helper_tb_functions)
  (preprocess
   (pps ppx_hardcaml ppx_jane))
