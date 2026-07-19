@@ -89,6 +89,10 @@ module O = struct
     m_axis_tlast  : 'a;
     m_axis_tvalid : 'a;
     m_axis_tuser  : 'a;
+    (* 1-transfer pulse on the first payload byte of each RX frame (read/tx_clock
+       domain, aligned to m_axis). This is the start-of-frame kick a downstream
+       protocol FSM (e.g. UDP-rx) needs to begin parsing. *)
+    m_axis_tfirst : 'a;
 
     (* FSM state indicators *)
     in_preamble : 'a;
@@ -98,6 +102,13 @@ module O = struct
     (* CRC result — sampled once per frame *)
     frame_crc_ok : 'a;  (* holds last frame's CRC result; 1 = good *)
     frame_done   : 'a;  (* 1-cycle pulse when a frame completes *)
+
+    (* Latched RX ethertype (rx_clock domain), surfaced for protocol filtering —
+       consistent with the frame_crc_ok/in_payload rx-domain passthroughs already
+       re-exported by udp_mac_top. Stable per-frame; a tx-domain consumer samples
+       it at m_axis_tfirst. (Future hardening: pack into Rx_word to make it
+       read-side-aligned if the CDC caveat bites.) *)
+    rx_eth_type : 'a [@bits 16];
 
     (* TX MII output *)
     tx_d  : 'a [@bits 4];
@@ -394,6 +405,22 @@ let create
       (bits_lsb controller_inst.keep)
   ) in
 
+  (* ── RX start-of-frame qualifier (read/tx_clock side, aligned to m_axis) ──
+     A sideband like tlast/tuser: asserted alongside the first byte of a frame and
+     sampled by the consumer on its transfer (tvalid & tready & tfirst = SOF).
+     frame_active tracks "mid-frame" across real AXI transfers — set on any
+     transfer, cleared on the tlast transfer — so tfirst is high from the moment
+     the first byte is presented until that byte is actually consumed. A 1-byte
+     frame both starts and (via tlast) ends on the same transfer, leaving
+     frame_active clear for the next frame. *)
+  let rx_transfer  = rx_fifo.valid &: inputs.I.m_axis_tready in
+  let frame_active =
+    Signal.reg_fb tx_spec ~enable:vdd ~width:1 ~f:(fun cur ->
+      mux2 rx_transfer (mux2 rx_rd_word.last gnd vdd) cur)
+    -- "rx_frame_active"
+  in
+  let m_axis_tfirst = (rx_fifo.valid &: ~:frame_active) -- "m_axis_tfirst" in
+
   (* old non-fifo interface -> use param to emulate generate block *)
   (* { *)
   (*   m_axis_tdata  = datapath_inst.payload_out; *)
@@ -412,12 +439,14 @@ let create
     m_axis_tlast  = rx_rd_word.last;
     m_axis_tkeep  = Signal.vdd;  (* single-byte MAC: tkeep is always 1, tied off here rather than crossed through the FIFO RAM *)
     m_axis_tuser  = rx_rd_word.user;
+    m_axis_tfirst = m_axis_tfirst;
 
     in_preamble   = controller_inst.in_preamble;
     in_dst_mac    = controller_inst.in_dst_mac;
     in_payload    = controller_inst.in_payload;
     frame_crc_ok  = frame_ok;
     frame_done    = Signal.reg rx_spec frame_end_d;
+    rx_eth_type   = datapath_inst.eth_type;
     tx_d          = tx_ser.tx_d;
     tx_en         = tx_ser.tx_en;
     tx_busy       = tx_ctrl.tx_busy;

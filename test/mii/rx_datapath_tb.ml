@@ -1,105 +1,92 @@
 open! Core
 open! Hardcaml
 open! Mii_of_hardcaml
-open! Hardcaml_waveterm
+
+let () = print_endline "=== Running MAC RX Datapath Testbench ==="
+
+module Sim = Cyclesim.With_interface (Rx_datapath.I) (Rx_datapath.O)
 
 let () =
-  print_endline "=== Running  MAC RX Datapath Testbench ===";;
-
-module Waveform = Hardcaml_waveterm.Waveform
-module Sim = Cyclesim.With_interface(Rx_datapath.I)(Rx_datapath.O)
-(* we hand Sim's namespace a create function and it does the heavy lifting because the shapes were known from the earlier functor call *)
-
-let create_sim ()
-  =
   let scope = Scope.create ~flatten_design:true ~auto_label_hierarchical_ports:true () in
-  let sim   = Sim.create ~config:Cyclesim.Config.trace_all (Rx_datapath.create scope) in
-  let waves, sim                        = Waveform.create sim in
-  let inputs  : _ Rx_datapath.I.t = Cyclesim.inputs sim in
-  let outputs : _ Rx_datapath.O.t = Cyclesim.outputs sim in
-  (sim, waves, inputs, outputs)
+  let sim = Sim.create (Rx_datapath.create scope) in
+  let i = Cyclesim.inputs sim in
+  let o = Cyclesim.outputs sim in
+  let ( <-- ) r v = r := Bits.of_int_trunc ~width:(Bits.width !r) v in
+  let cycle () = Cyclesim.cycle sim in
 
-let () = 
-  let open Bits in
-  let sim, waves, inputs, outputs = create_sim () in
-
-  (* vcd wrapper *)
-  Out_channel.with_file "waves_datapath.vcd" ~f:(fun oc->
-  let sim = Vcd.wrap oc sim in
-
-  (* display helper *)
- let cycle () =
-    Cyclesim.cycle sim;
+  let all_ok = ref true in
+  let check name cond =
+    if not cond then all_ok := false;
+    printf "  %-46s: %s\n" name (if cond then "PASS" else "FAIL")
   in
-  
-  (* assign helper *)
-  let (<--) r i = r := Bits.of_int_trunc ~width:(Bits.width !r) i in
-
-  (* signal aliases *)
-  let t_clk   = inputs.clk in
-  let t_rst   = inputs.rst in
-  let t_en    = inputs.byte_assembler_en in
-
-  let t_in          = inputs.rx_data in
-  let t_payload_sel = inputs.payload_sel in
-
-  let t_out       = outputs.payload_out in
-  (* let t_out_valid = outputs.payload_out_valid in *)
 
   let reset () =
-    t_en  <-- 0;
-    t_rst <-- 1;
+    i.Rx_datapath.I.reset <-- 1;
+    i.en <-- 0;
+    i.byte_assembler_en <-- 0;
+    i.dst_mac_reg_en <-- 0;
+    i.src_mac_reg_en <-- 0;
+    i.eth_type_reg_en <-- 0;
+    i.payload_sel <-- 0;
+    i.emit_payload <-- 0;
+    i.fcs_present <-- 0;
+    i.rx_data <-- 0;
     cycle ();
-    t_rst <-- 0;
-    t_en <-- 1;
-    t_in <-- 0;
+    i.reset <-- 0;
+    i.en <-- 1;
+    i.byte_assembler_en <-- 1
   in
 
-  let send lo hi =
-    t_in <-- lo;
+  (* Drive one MII nibble and, matching mac_top's write gating
+     (payload_out_valid & raw_byte_out_valid), collect one payload byte per
+     assembled byte. *)
+  let collected = ref [] in
+  let step nib =
+    i.rx_data <-- nib;
     cycle ();
-    t_in <-- hi;
-    cycle ();
+    if Bits.to_bool !(o.Rx_datapath.O.payload_out_valid)
+       && Bits.to_bool !(o.raw_byte_out_valid)
+    then collected := !collected @ [ Bits.to_int_trunc !(o.payload_out) ]
+  in
+  let send_byte b =
+    step (b land 0xF);
+    step ((b lsr 4) land 0xF)
   in
 
-  let send_byte byte =
-    let hi = (byte lsr 4) land 0xF in
-    let lo = byte land 0xF in
-    send hi lo;
-
-    printf "\n==Byte sent: == %d ==\n" byte;
-    (* slice the byte in half, how do we do more advanced math with a hex value? *)
-  in
-
-  let idle () =
-    t_en <-- 0;
-    cycle ();
-  in
-
-  (* -- test 1: 0x55 for a while -> expect state=PREAMBLE -- *)
-  printf "\n[test 1] 0x55";
+  (* ── test 1: ethertype latch ── *)
+  printf "\n[test 1] ethertype latch (0x45, 0x21 -> 0x4521)\n";
   reset ();
+  i.eth_type_reg_en <-- 1;
+  send_byte 0x45;
+  send_byte 0x21;
+  cycle ();  (* flush: last byte's raw_byte_out_valid shifts 0x21 in while reg_en high *)
+  i.eth_type_reg_en <-- 0;
+  printf "  eth_type = 0x%04x\n" (Bits.to_int_trunc !(o.eth_type));
+  check "eth_type == 0x4521" (Bits.to_int_trunc !(o.eth_type) = 0x4521);
 
-  for i = 0 to 5 do
-    (* send_byte 0x55; *)
-    t_in <-- 0x5;
-    cycle();
-    t_in <-- 0x5;
-    cycle();
+  (* ── test 2: FCS strip — payload emitted, trailing 4 CRC bytes dropped ── *)
+  printf "\n[test 2] FCS strip\n";
+  reset ();
+  collected := [];
+  let payload = [ 0x11; 0x22; 0x33; 0x44; 0x55 ] in
+  let fcs = [ 0xAA; 0xBB; 0xCC; 0xDD ] in
+  (* emit_payload / payload_sel high across payload+FCS, exactly as the controller
+     holds them while rx_dv is asserted; both drop when the frame ends. *)
+  i.emit_payload <-- 1;
+  i.payload_sel <-- 1;
+  List.iter (payload @ fcs) ~f:send_byte;
+  i.emit_payload <-- 0;
+  i.payload_sel <-- 0;
+  (* drain the 4-deep pipeline *)
+  for _ = 0 to 12 do
+    step 0
   done;
+  printf "  collected: %s\n"
+    (String.concat ~sep:" " (List.map !collected ~f:(sprintf "%02x")));
+  check "payload bytes emitted in order, FCS stripped"
+    (List.equal Int.equal !collected payload);
 
-  t_payload_sel <-- 1;
-  for i = 0x61 to 0x67 do
-    send_byte i;
-  done;
-
-  idle ();
-
-  (* tail cycle *)
-  for i = 0 to 10 do
-    cycle();
-  done;
-
-  print_endline "\n=== SIMULATION COMPLETE ===";
-  )
+  printf "\n=== %s ===\n" (if !all_ok then "ALL PASS" else "FAILURES PRESENT");
+  print_endline "=== SIMULATION COMPLETE ===";
+  if not !all_ok then exit 1
 ;;

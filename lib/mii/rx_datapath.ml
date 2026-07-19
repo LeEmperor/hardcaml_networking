@@ -1,10 +1,16 @@
+(*
+  Bohdan Purtell
+  University of Florida
+
+  Module: Rx_datapath
+  Byte-level RX datapath: reassembles nibbles into bytes, latches the Ethernet
+  header fields (dst/src MAC + ethertype), and runs the 4-deep FCS-strip pipeline
+  so the emitted payload excludes the trailing 4 CRC bytes.
+*)
+
 open! Core
 open! Hardcaml
 open! Signal
-open! Always
-open! Variable
-
-(* config option for a fifo or not at the very end of the rx path ? *)
 
 let () =
   Stdio.print_endline "=== Imported MAC RX Datapath ==="
@@ -13,161 +19,110 @@ module I = struct
   type 'a t = {
     clock : 'a;
     reset : 'a;
-    en  : 'a;
+    en    : 'a;
 
-    (* reg ens *)
+    (* reg enables (from rx_controller) *)
     dst_mac_reg_en    : 'a;
     src_mac_reg_en    : 'a;
     byte_assembler_en : 'a;
     eth_type_reg_en   : 'a;
 
     (* sels *)
-    payload_sel : 'a;
+    payload_sel  : 'a;
     emit_payload : 'a;
-    fcs_present : 'a;
+    fcs_present  : 'a;
 
-    (* branch input *)
+    (* branch input: raw MII nibble *)
     rx_data : 'a [@bits 4];
-    (* how does one prevent an initial phase shift of 180 degrees of the nibbles alignment? *)
   } [@@deriving hardcaml]
 end
 
 module O = struct
   type 'a t = {
-    raw_byte_out        : 'a [@bits 8];
-    raw_byte_out_valid  : 'a;
+    raw_byte_out       : 'a [@bits 8];
+    raw_byte_out_valid : 'a;
 
-    payload_out         : 'a [@bits 8];
-    payload_out_valid   : 'a;
+    payload_out       : 'a [@bits 8];
+    payload_out_valid : 'a;
+
+    (* latched ethertype — valid once the ETH_TYPE bytes have shifted in.
+       Surfaced for downstream protocol filtering (e.g. UDP-rx). *)
+    eth_type : 'a [@bits 16];
 
     (* debug lines *)
     keep : 'a;
   } [@@deriving hardcaml]
 end
 
-(* let tag_reg name (v : Always.Variable.t) = *)
-(*   Always.Variable.{ v with value = v.value -- name } *)
+(* Header accumulators. Each shifts in one byte per enabled cycle (MSB-first),
+   so after the header states they hold the full dst/src MAC and ethertype. *)
+module I_Regs = struct
+  type 'a t = {
+    dst_addr : 'a [@bits 48];
+    src_addr : 'a [@bits 48];
+    eth_type : 'a [@bits 16];
+  } [@@deriving hardcaml]
+end
 
-let create 
-  (scope : Scope.t )
-  (i) : _ O.t
-  = 
-  (* scope shenanigans *) 
+let create
+  (scope : Scope.t)
+  (i : _ I.t) : _ O.t
+  =
+  let open Always in
   let _scope : Scope.t = Scope.sub_scope scope "rx_datapath_scope" in
-
-  (* port aliases *) (* possible to make a function that auto makes the port aliases for me? *)
-  let clock = i.I.clock in
-  let reset = i.I.reset in
-  let clear = reset in
-  let en = i.I.en in
-  let payload_sel = i.I.payload_sel in
-  let dst_mac_reg_en = i.I.dst_mac_reg_en in
-  let src_mac_reg_en = i.I.src_mac_reg_en in
-  let eth_type_reg_en = i.I.eth_type_reg_en in
-  let emit_payload = i.I.emit_payload in
-  let fcs_present = i.I.fcs_present -- "dbg_datapath_fcs_present" in
-  let rising_edge = Reg_spec.create ~clock ~clear () in
-
-  (* let fcs_pipeline =  *)
-  (*   Stages.pipeline_with_enable *)
-  (*   rising_edge *)
-  (*   4 *)
-  (*   ~enable:raw_byte_out_valid *)
-  (*   ~init:raw_byte_out *)
-  (*   ~f:(Fn.const Fn.id) *)
-  (* in *)
+  let spec = Reg_spec.create ~clock:i.clock ~clear:i.reset () in
 
   let byte_assembler_inst =
-    Rx_byte_assembler.create {
-      Rx_byte_assembler.I.rx_data   = i.I.rx_data;
-      Rx_byte_assembler.I.en        = i.I.byte_assembler_en;
-      Rx_byte_assembler.I.clock     = clock;
-      Rx_byte_assembler.I.reset     = reset;
-    }
+    Rx_byte_assembler.create _scope
+      { Rx_byte_assembler.I.rx_data = i.rx_data
+      ; en                          = i.byte_assembler_en
+      ; clock                       = i.clock
+      ; reset                       = i.reset
+      }
   in
+  let raw_byte_out       = byte_assembler_inst.byte_out   -- "raw_byte_out" in
+  let raw_byte_out_valid = byte_assembler_inst.byte_valid -- "raw_byte_out_valid" in
 
-  (* internal floating regs *)
-  (* in theory this is another "assembler" thingy that I wrote with the nibble assembler, therefore I might be able to parameterize one for the word with in and the word with out, which should become an SRL or just MUXs in a Xilinx CLB *)
-  let dst_addr_reg = reg ~enable:vdd ~width:48 rising_edge in
-  (* let dst_addr = dst_addr_reg.value -- "dst_addr" in *)
-  (* let dst_addr_reg = Always.Variable.reg ~enable:vdd ~width:48 rising_edge |> tag_reg "dst_addr" in *)
-  let src_addr_reg = reg ~enable:vdd ~width:48 rising_edge in
-  let eth_type_reg = reg ~enable:vdd ~width:16 rising_edge in
+  let r = I_Regs.Of_always.reg ~enable:vdd spec in
+  I_Regs.Of_always.apply_names ~prefix:"reg_" ~naming_op:(Scope.naming scope) r;
 
-  (* internal ties - TODO: write a custom tagger function, may require formal PR on JS Hardcaml *)
-  let raw_byte_out        = byte_assembler_inst.byte_out   -- "dbg_byte_assembler_out" in
-  let raw_byte_out_valid  = byte_assembler_inst.byte_valid -- "dbg_byte_assembler_valid" in
-  let dst_addr            = dst_addr_reg.value -- "dbg_dst_addr" in
-  let src_addr            = src_addr_reg.value -- "dbg_src_addr" in
-  let eth_type            = eth_type_reg.value -- "dbg_eth_type" in
+  (* shift one byte into [reg] MSB-first *)
+  let shift_in reg byte = reg <-- (sll reg.value ~by:8 |: uresize byte ~width:(width reg.value)) in
 
-  (* pipeline - TODO: use hardcaml_circuits STAGES module later *)
-  let reg_en        = Signal.reg rising_edge ~enable:raw_byte_out_valid in
-  let fcs_b0        = reg_en raw_byte_out   -- "dbg_stage1_val" in
-  let fcs_b1        = reg_en fcs_b0         -- "dbg_stage2" in
-  let fcs_b2        = reg_en fcs_b1         -- "dbg_stage3" in
-  let fcs_b3        = reg_en fcs_b2         -- "dbg_stage4" in
-  let fcs_valid_b0  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) emit_payload -- "valid_stage1" in
-  let fcs_valid_b1  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) fcs_valid_b0 -- "valid_stage2" in
-  let fcs_valid_b2  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) fcs_valid_b1 -- "valid_stage3" in
-  let fcs_valid_b3  = Signal.reg rising_edge ~enable:(raw_byte_out_valid &: vdd) fcs_valid_b2 -- "valid_stage4" in
-  let delayed_byte  = fcs_b3 in
-  let delayed_valid = fcs_valid_b3 -- "dbg_delayed_valid_raw" in
-
-  (* fcs result register -- 4 bytes wide *)
-  let reg_fcs_result  = ((fcs_b0) @: (fcs_b1) @: (fcs_b2) @: (fcs_b3)) -- "dbg_crc_4_bytes" in
-
-  (* mux the payload out between 0 and the actual byte out *)
-  let wire_out      = mux payload_sel [zero 8; delayed_byte] -- "dbg_payload_out_delayed" in
-
-  (* payload is valid when the controller says it is, but AND'd with the delayed valid, therefore we shouldn't see FCS emitted as valid *)
-  let payload_out_valid = (emit_payload &: delayed_valid) -- "dbg_payload_out_valid_delayed" in
-
-  (* behavioural register instantiations *)
   compile [
-    when_ (dst_mac_reg_en &: raw_byte_out_valid) [
-      dst_addr_reg <-- (
-        (sll dst_addr ~by:8)
-        |: (uresize raw_byte_out ~width:48)
-      );
-    ];
-    when_ (src_mac_reg_en &: raw_byte_out_valid) [
-      src_addr_reg <-- (
-        (sll src_addr ~by:8)
-        |: (uresize raw_byte_out ~width:48);
-      );
-    ];
-    when_ (eth_type_reg_en &: raw_byte_out_valid) [
-      eth_type_reg <-- (
-        (sll eth_type ~by:8)
-        |: (uresize raw_byte_out ~width:16)
-      );
-    ];
+    when_ (i.dst_mac_reg_en  &: raw_byte_out_valid) [ shift_in r.dst_addr raw_byte_out ];
+    when_ (i.src_mac_reg_en  &: raw_byte_out_valid) [ shift_in r.src_addr raw_byte_out ];
+    when_ (i.eth_type_reg_en &: raw_byte_out_valid) [ shift_in r.eth_type raw_byte_out ];
   ];
 
-  (* keep shenanigans for dbg *)
-  let keep = reduce ~f:(|:) (
-    (bits_lsb raw_byte_out) @
-    (bits_lsb raw_byte_out_valid) @
-    (bits_lsb dst_addr) @ 
-    (bits_lsb src_addr) @ 
-    (bits_lsb eth_type) @ 
-    (bits_lsb wire_out) @
-    (bits_lsb reg_fcs_result) @
-    (bits_lsb fcs_present)
-  ) in
+  (* FCS-strip pipeline: delay the byte stream (and its emit-valid) by 4 enabled
+     cycles. Only bytes older than the 4 in-flight FCS bytes are ever emitted, so
+     the trailing CRC never reaches payload_out. Enable = raw_byte_out_valid so the
+     pipeline advances exactly once per assembled byte. *)
+  let delayed_byte  = Signal.pipeline spec ~n:4 ~enable:raw_byte_out_valid raw_byte_out  -- "delayed_byte" in
+  let delayed_valid = Signal.pipeline spec ~n:4 ~enable:raw_byte_out_valid i.emit_payload -- "delayed_valid" in
 
-  {
-    (* this is what the controller uses to branch *)
-    raw_byte_out        = raw_byte_out;
-    raw_byte_out_valid  = raw_byte_out_valid;
+  let wire_out          = mux i.payload_sel [ zero 8; delayed_byte ] -- "payload_out" in
+  let payload_out_valid = (i.emit_payload &: delayed_valid) -- "payload_out_valid" in
 
-    (* this is the actual output *)
-    payload_out       = wire_out;
-    payload_out_valid = payload_out_valid;
+  let keep =
+    reduce ~f:( |: )
+      (bits_lsb raw_byte_out
+       @ bits_lsb raw_byte_out_valid
+       @ bits_lsb r.dst_addr.value
+       @ bits_lsb r.src_addr.value
+       @ bits_lsb r.eth_type.value
+       @ bits_lsb wire_out
+       @ bits_lsb delayed_byte
+       @ bits_lsb i.fcs_present)
+  in
 
-    (* debug_dst_mac = dst_addr; *)
-    keep = keep; (* truncation issues? *)
+  { O.
+    raw_byte_out
+  ; raw_byte_out_valid
+  ; payload_out       = wire_out
+  ; payload_out_valid
+  ; eth_type          = r.eth_type.value
+  ; keep
   }
 ;;
-
