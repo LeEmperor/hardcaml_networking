@@ -15,15 +15,15 @@ Two modes:
                width bug) and cannot yet be validated. Included so the tooling
                is ready when that parser lands.
 
-ETHERTYPE CAVEAT
-----------------
-The MAC's tx_datapath currently hardcodes ethertype 0x9999, NOT 0x0800. A real
-host kernel therefore will NOT deliver these frames to a UDP socket — they are
-raw Ethernet frames that happen to carry IPv4/UDP bytes. That is why --validate
-sniffs raw frames (scapy) and parses the IPv4/UDP header BY HAND instead of
-relying on the OS stack. Once the MAC ethertype is parameterized to 0x0800
-(see the CAVEAT in lib/udp/udp_mac_top.ml), a normal `recvfrom` on a UDP socket
-would work and this script could be simplified. Until then: raw sniff.
+ETHERTYPE
+---------
+The MAC's tx_datapath now emits ethertype 0x0800 (real IPv4), so these are
+genuine IPv4/UDP frames. --validate still raw-sniffs (scapy) and hand-parses the
+IPv4/UDP header rather than leaning on the OS stack — that keeps the check
+self-contained (independent of kernel routing/socket state) and lets it assert
+on every field. A normal `recvfrom` on a UDP socket would now also work if you
+prefer to simplify. (Historically the datapath emitted a custom 0x9999 so the
+OS would ignore the payload; that has since been parameterized to 0x0800.)
 
 Golden constants below MUST match udp_tx.ml / test/udp/udp_mac_top_tb.ml.
 
@@ -40,7 +40,7 @@ from scapy.all import Ether, Raw, sendp, sniff
 # ── golden constants (mirror udp_tx.ml / udp_mac_top_tb.ml) ──────────────────
 FPGA_SRC_MAC = "02:00:00:00:00:01"   # Mac_top tx_datapath hardcoded SRC MAC
 FPGA_DST_MAC = "ff:ff:ff:ff:ff:ff"   # hardcoded DST MAC (broadcast)
-ETHERTYPE = 0x9999                   # custom ethertype (see CAVEAT above)
+ETHERTYPE = 0x0800                   # IPv4 — MAC tx_datapath now emits real 0x0800
 
 SRC_IP = "192.168.1.10"
 DST_IP = "192.168.1.1"
