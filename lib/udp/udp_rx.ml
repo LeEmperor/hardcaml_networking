@@ -92,6 +92,12 @@ module Make (C : Config) = struct
       ip_src_ip   : 'a [@bits 32];
       ip_dst_ip   : 'a [@bits 32];
 
+      (* frame-level late status from Ipv4_rx (see Ipv4_rx.O.frame_done). Carries
+         the FCS/CRC verdict that cannot ride the payload tlast — forwarded up to
+         the application unchanged. *)
+      ip_frame_done  : 'a;
+      ip_frame_error : 'a;
+
       (* backpressure from the application *)
       app_tready : 'a;
     } [@@deriving hardcaml]
@@ -122,8 +128,18 @@ module Make (C : Config) = struct
       (* per-frame status *)
       port_match  : 'a;            (* dst_port == expected_dst_port (informational) *)
       checksum_ok : 'a;            (* STUB: always high — checksum not enforced yet *)
-      crc_error   : 'a;            (* IPv4/MAC reported a bad frame (rx_tuser) *)
+      crc_error   : 'a;            (* IPv4/MAC reported a bad frame (rx_tuser) — note:
+                                      this legacy tlast-aligned flag misses the FCS
+                                      verdict for padded frames; use the frame-level
+                                      [frame_done]/[frame_error] channel below. *)
       busy        : 'a;
+
+      (* frame-level late status, forwarded from Ipv4_rx (see Ipv4_rx.O.frame_done).
+         Latch [frame_error] on the [frame_done] pulse to get the app-visible
+         bad-frame (FCS/CRC) verdict, valid even when MAC padding delays it past
+         the payload tlast. *)
+      frame_done  : 'a;
+      frame_error : 'a;
 
       keep : 'a;
     } [@@deriving hardcaml]
@@ -315,6 +331,10 @@ module Make (C : Config) = struct
     ; checksum_ok
     ; crc_error      = r.crc_err.value
     ; busy           = r.busy.value
+    (* forward the frame-level late status straight up (UDP adds no FCS verdict of
+       its own; the bad-frame signal originates at the MAC/IPv4 boundary) *)
+    ; frame_done     = i.I.ip_frame_done
+    ; frame_error    = i.I.ip_frame_error
     ; keep
     }
   ;;
