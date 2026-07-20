@@ -201,6 +201,8 @@ struct
         ; ip_protocol = ip.protocol
         ; ip_src_ip = ip.src_ip
         ; ip_dst_ip = ip.dst_ip
+        ; ip_frame_done = ip.frame_done
+        ; ip_frame_error = ip.frame_error
         ; app_tready = i.app_tready
         }
     in
