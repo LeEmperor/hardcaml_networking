@@ -9,11 +9,19 @@ Two modes:
                driven on the board by a btn[3] press. Each press emits one
                datagram; this parses + checks the IPv4/UDP header and payload.
 
-  --send       Craft + send a UDP datagram toward the FPGA (host -> FPGA).
-               This is a STUB for the future RX path: the receive-side parser
-               (Udp.Make in lib/udp/udp.ml) is still WIP (a known dst_port
-               width bug) and cannot yet be validated. Included so the tooling
-               is ready when that parser lands.
+  --send       Craft + send a UDP datagram toward the FPGA (host -> FPGA) to
+               exercise the RX path. Targets the Udp_rx_mac_top RX stack
+               (Ipv4_rx + Udp_rx stacked on Mac_top's RX path), which is
+               sim-verified and driven on the board by
+               udp_rx_mac_top_validation_harness. The frame's dst UDP port
+               (0x1235) and ethertype (0x0800) match what that harness accepts.
+
+               Confirmation is VISUAL on the board LEDs — this is fire-and-forget;
+               there is no host-side readback of the recovered datagram yet (that
+               needs an echo-back full-duplex harness). Use --pattern alt to send
+               an alternating 0xAA/0x55 payload so the harness's 1-byte/sec drain
+               makes led[3:0] visibly toggle 0xA <-> 0x5 as each recovered byte
+               pops — the UDP mirror of the MAC-RX FIFO-drain check.
 
 ETHERTYPE
 ---------
@@ -30,6 +38,7 @@ Golden constants below MUST match udp_tx.ml / test/udp/udp_mac_top_tb.ml.
 Usage (needs CAP_NET_RAW, i.e. sudo):
     sudo python3 udp_app.py --validate --iface enx207bd25880ef
     sudo python3 udp_app.py --send     --iface enx207bd25880ef
+    sudo python3 udp_app.py --send --pattern alt --app-len 8 --iface enx207bd25880ef
 """
 
 import argparse
@@ -54,8 +63,20 @@ DEFAULT_IFACE = "enx207bd25880ef"
 
 
 def expected_app(n):
-    """Incrementing 0x01..0x?? truncated to a byte — matches payload_byte in the harness."""
+    """Incrementing 0x01..0x?? truncated to a byte — matches payload_byte in the TX harness."""
     return bytes(((i + 1) & 0xFF) for i in range(n))
+
+
+def make_payload(pattern, n):
+    """Application payload for --send.
+
+    'inc' — incrementing 0x01,0x02,… (same as the TX harness emits).
+    'alt' — alternating 0xAA,0x55,… so the RX harness's 1-byte/sec drain makes
+            led[3:0] toggle 0xA <-> 0x5, the UDP mirror of the MAC-RX check.
+    """
+    if pattern == "alt":
+        return bytes((0xAA if i % 2 == 0 else 0x55) for i in range(n))
+    return expected_app(n)  # 'inc'
 
 
 def ones_complement_sum(data):
@@ -190,36 +211,49 @@ def validate(iface, app_len, count):
     return seen["pass"] == seen["n"] and seen["n"] > 0
 
 
-# ── send (host -> FPGA, RX-path stub) ─────────────────────────────────────────
-def send(iface, app_len, count):
-    print("NOTE: --send targets the FPGA RX path, whose parser (Udp.Make) is still")
-    print("      WIP and NOT yet validatable. This just puts a well-formed datagram")
-    print("      on the wire so the tooling is ready for that work.\n")
-    app = expected_app(app_len)
+# ── send (host -> FPGA, RX path) ──────────────────────────────────────────────
+def send(iface, app_len, count, pattern):
+    app = make_payload(pattern, app_len)
     frame = Ether(dst=FPGA_DST_MAC, src="de:ad:be:ef:00:02", type=ETHERTYPE) / Raw(
         build_datagram(app)
     )
     print(f"Sending on {iface}: ethertype 0x{ETHERTYPE:04x}, "
-          f"{SRC_IP}:0x{SRC_PORT:04x} -> {DST_IP}:0x{DST_PORT:04x}, app={app_len}B")
+          f"{SRC_IP}:0x{SRC_PORT:04x} -> {DST_IP}:0x{DST_PORT:04x}, "
+          f"app={app_len}B (pattern={pattern})")
     print(f"  app payload: {hexdump(app)}")
     sendp(frame, iface=iface, count=count, verbose=True)
+
+    # Confirmation is on the board (udp_rx_mac_top_validation_harness); no host
+    # readback yet. Print the LED checklist so it's clear what a PASS looks like.
+    print("\nConfirm on the RX board harness (udp_rx_mac_top_validation_harness):")
+    print("  led0_g  saw_valid_datagram  -> lights and stays lit")
+    print("  led2_g  checksum_ok (IPv4)  -> lit")
+    print("  led2_r / led3_r  crc_error  -> DARK (good frame)")
+    print("  led[3:0] steps through the recovered payload low-nibbles, ~1/sec:")
+    if pattern == "alt":
+        print("           toggles 0xA <-> 0x5   (0xAA/0x55 alternating)")
+    else:
+        print("           0x1, 0x2, 0x3, …      (incrementing)")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--validate", action="store_true", help="sniff + check FPGA-emitted UDP datagrams (TX path)")
-    mode.add_argument("--send", action="store_true", help="send a UDP datagram to the FPGA (RX path, stub)")
+    mode.add_argument("--send", action="store_true", help="send a UDP datagram to the FPGA (RX path)")
     ap.add_argument("--iface", default=DEFAULT_IFACE, help=f"network interface (default {DEFAULT_IFACE})")
     ap.add_argument("--app-len", type=int, default=DEFAULT_APP_LEN, help=f"application payload length (default {DEFAULT_APP_LEN})")
     ap.add_argument("--count", type=int, default=1, help="frames to capture/send (default 1)")
+    ap.add_argument("--pattern", choices=("inc", "alt"), default="inc",
+                    help="--send payload pattern: 'inc' incrementing (default), "
+                         "'alt' alternating 0xAA/0x55 (led[3:0] toggles 0xA<->0x5)")
     args = ap.parse_args()
 
     if args.validate:
         ok = validate(args.iface, args.app_len, args.count)
         sys.exit(0 if ok else 1)
     else:
-        send(args.iface, args.app_len, args.count)
+        send(args.iface, args.app_len, args.count, args.pattern)
 
 
 if __name__ == "__main__":
