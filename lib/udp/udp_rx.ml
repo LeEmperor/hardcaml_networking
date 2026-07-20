@@ -109,7 +109,8 @@ module Make (C : Config) = struct
       m_tfirst : 'a;              (* SOF pulse on the first application byte *)
 
       (* metadata — RX mirror of the Udp_tx {start, payload_len} contract *)
-      app_start      : 'a;         (* pulse alongside m_tfirst; latch metadata here *)
+      app_start      : 'a;         (* pulse with m_tfirst, or alone for an empty
+                                      datagram; latch metadata here *)
       src_port       : 'a [@bits 16];
       dst_port       : 'a [@bits 16];
       udp_length     : 'a [@bits 16]; (* UDP length field (8 + app data) *)
@@ -148,6 +149,7 @@ module Make (C : Config) = struct
       payload_rem : 'a [@bits 16];  (* app-payload bytes still to forward *)
       crc_err     : 'a;             (* latched from rx_tuser at rx_tlast *)
       first_pend  : 'a;             (* drives the first-payload-byte SOF pulse *)
+      empty_start : 'a;             (* one-cycle metadata pulse for length = 8 *)
       busy        : 'a;
     } [@@deriving hardcaml]
   end
@@ -187,6 +189,7 @@ module Make (C : Config) = struct
     let at_hdr_end = idx ==:. udp_hdr_len - 1 in
     (* payload length computed at header end from the latched UDP length field *)
     let has_payload = r.length.value >:. udp_hdr_len in
+    let empty_payload = r.length.value ==:. udp_hdr_len in
     let payload_len_next = r.length.value -:. udp_hdr_len in
     (* dst_port is fully latched by idx==3, so it is valid to test at header end *)
     let port_ok = r.dst_port.value ==:. C.expected_dst_port in
@@ -199,6 +202,7 @@ module Make (C : Config) = struct
       ; w.tlast   <--. 0
       ; w.tfirst  <--. 0
       ; r.busy    <-- r.busy.value
+      ; r.empty_start <--. 0
 
       ; sm.switch ~default:[]
           [ ( Idle
@@ -229,6 +233,8 @@ module Make (C : Config) = struct
                       [ r.payload_len <-- payload_len_next
                       ; r.payload_rem <-- payload_len_next
                       ; r.first_pend  <--. 1
+                      ; when_ (empty_payload &: keep_frame)
+                          [ r.empty_start <--. 1 ]
                       ; if_ (has_payload &: keep_frame)
                           [ sm.set_next Payload ]
                           [ (* empty datagram or port-filtered: no app output *)
@@ -297,7 +303,7 @@ module Make (C : Config) = struct
     ; m_tvalid       = w.tvalid.value
     ; m_tlast        = w.tlast.value
     ; m_tfirst       = w.tfirst.value
-    ; app_start      = w.tfirst.value
+    ; app_start      = w.tfirst.value |: r.empty_start.value
     ; src_port       = r.src_port.value
     ; dst_port       = r.dst_port.value
     ; udp_length     = r.length.value
