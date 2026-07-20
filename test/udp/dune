@@ -1,7 +1,12 @@
-(executables
+(tests
  (names udp_tx_tb udp_mac_top_tb udp_rx_tb)
- (libraries core hardcaml udp_of_hardcaml hardcaml_waveterm helper_tb_functions)
+ (libraries
+  core
+  hardcaml
+  udp_of_hardcaml
+  hardcaml_waveterm
+  helper_tb_functions)
  (preprocess
   (pps ppx_hardcaml ppx_jane))
- (flags (:standard -w -27-57-33-34-35-40-63-47-26))
- )
+ (flags
+  (:standard -w -27-57-33-34-35-40-63-47-26)))

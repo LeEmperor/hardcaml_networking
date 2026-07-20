@@ -218,5 +218,6 @@ let () =
   let results = [ r1; r2; r3 ] in
   printf "\n==== SUMMARY: %d/%d passed ====\n"
     (List.count results ~f:Fn.id) (List.length results);
-  print_endline "\n=== SIMULATION COMPLETE ==="
+  print_endline "\n=== SIMULATION COMPLETE ===";
+  if not (List.for_all results ~f:Fn.id) then exit 1
 ;;
