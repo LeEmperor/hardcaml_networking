@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Host-side companion for the UDP-over-MAC validation harness on the Arty A7.
 
-Two modes:
+Three modes:
+
+  --echo       Send a datagram AND assert the FPGA echoes it back with the same
+               payload (host -> FPGA -> host). Targets the loopback harness
+               (udp_loopback_validation_harness), whose RX->TX bridge feeds the
+               recovered payload straight back out. This is the host-asserted
+               closure of the RX path: exit 0 = PASS, no LED eyeballing.
 
   --validate   Sniff the wire and verify the UDP datagrams the FPGA emits
                (FPGA -> host). This is the currently-validatable path: the
@@ -9,38 +15,48 @@ Two modes:
                driven on the board by a btn[3] press. Each press emits one
                datagram; this parses + checks the IPv4/UDP header and payload.
 
-  --send       Craft + send a UDP datagram toward the FPGA (host -> FPGA).
-               This is a STUB for the future RX path: the receive-side parser
-               (Udp.Make in lib/udp/udp.ml) is still WIP (a known dst_port
-               width bug) and cannot yet be validated. Included so the tooling
-               is ready when that parser lands.
+  --send       Craft + send a UDP datagram toward the FPGA (host -> FPGA) to
+               exercise the RX path. Targets the Udp_rx_mac_top RX stack
+               (Ipv4_rx + Udp_rx stacked on Mac_top's RX path), which is
+               sim-verified and driven on the board by
+               udp_rx_mac_top_validation_harness. The frame's dst UDP port
+               (0x1235) and ethertype (0x0800) match what that harness accepts.
 
-ETHERTYPE CAVEAT
-----------------
-The MAC's tx_datapath currently hardcodes ethertype 0x9999, NOT 0x0800. A real
-host kernel therefore will NOT deliver these frames to a UDP socket — they are
-raw Ethernet frames that happen to carry IPv4/UDP bytes. That is why --validate
-sniffs raw frames (scapy) and parses the IPv4/UDP header BY HAND instead of
-relying on the OS stack. Once the MAC ethertype is parameterized to 0x0800
-(see the CAVEAT in lib/udp/udp_mac_top.ml), a normal `recvfrom` on a UDP socket
-would work and this script could be simplified. Until then: raw sniff.
+               Confirmation is VISUAL on the board LEDs — this is fire-and-forget;
+               there is no host-side readback of the recovered datagram yet (that
+               needs an echo-back full-duplex harness). Use --pattern alt to send
+               an alternating 0xAA/0x55 payload so the harness's 1-byte/sec drain
+               makes led[3:0] visibly toggle 0xA <-> 0x5 as each recovered byte
+               pops — the UDP mirror of the MAC-RX FIFO-drain check.
+
+ETHERTYPE
+---------
+The MAC's tx_datapath now emits ethertype 0x0800 (real IPv4), so these are
+genuine IPv4/UDP frames. --validate still raw-sniffs (scapy) and hand-parses the
+IPv4/UDP header rather than leaning on the OS stack — that keeps the check
+self-contained (independent of kernel routing/socket state) and lets it assert
+on every field. A normal `recvfrom` on a UDP socket would now also work if you
+prefer to simplify. (Historically the datapath emitted a custom 0x9999 so the
+OS would ignore the payload; that has since been parameterized to 0x0800.)
 
 Golden constants below MUST match udp_tx.ml / test/udp/udp_mac_top_tb.ml.
 
 Usage (needs CAP_NET_RAW, i.e. sudo):
     sudo python3 udp_app.py --validate --iface enx207bd25880ef
     sudo python3 udp_app.py --send     --iface enx207bd25880ef
+    sudo python3 udp_app.py --send --pattern alt --app-len 8 --iface enx207bd25880ef
+    sudo python3 udp_app.py --echo --pattern alt --iface enx207bd25880ef
 """
 
 import argparse
 import sys
 
-from scapy.all import Ether, Raw, sendp, sniff
+from scapy.all import AsyncSniffer, Ether, Raw, sendp, sniff
 
 # ── golden constants (mirror udp_tx.ml / udp_mac_top_tb.ml) ──────────────────
 FPGA_SRC_MAC = "02:00:00:00:00:01"   # Mac_top tx_datapath hardcoded SRC MAC
 FPGA_DST_MAC = "ff:ff:ff:ff:ff:ff"   # hardcoded DST MAC (broadcast)
-ETHERTYPE = 0x9999                   # custom ethertype (see CAVEAT above)
+ETHERTYPE = 0x0800                   # IPv4 — MAC tx_datapath now emits real 0x0800
 
 SRC_IP = "192.168.1.10"
 DST_IP = "192.168.1.1"
@@ -54,8 +70,20 @@ DEFAULT_IFACE = "enx207bd25880ef"
 
 
 def expected_app(n):
-    """Incrementing 0x01..0x?? truncated to a byte — matches payload_byte in the harness."""
+    """Incrementing 0x01..0x?? truncated to a byte — matches payload_byte in the TX harness."""
     return bytes(((i + 1) & 0xFF) for i in range(n))
+
+
+def make_payload(pattern, n):
+    """Application payload for --send.
+
+    'inc' — incrementing 0x01,0x02,… (same as the TX harness emits).
+    'alt' — alternating 0xAA,0x55,… so the RX harness's 1-byte/sec drain makes
+            led[3:0] toggle 0xA <-> 0x5, the UDP mirror of the MAC-RX check.
+    """
+    if pattern == "alt":
+        return bytes((0xAA if i % 2 == 0 else 0x55) for i in range(n))
+    return expected_app(n)  # 'inc'
 
 
 def ones_complement_sum(data):
@@ -105,8 +133,13 @@ def build_datagram(app):
 
 
 # ── validation (FPGA -> host) ─────────────────────────────────────────────────
-def check_datagram(payload, app_len, verbose=True):
-    """Parse the Ethernet payload as IPv4/UDP and check it. Returns True on PASS."""
+def check_datagram(payload, app_len, verbose=True, expected=None):
+    """Parse the Ethernet payload as IPv4/UDP and check it. Returns True on PASS.
+
+    [expected] overrides the expected application payload; when None it defaults to
+    the incrementing 0x01,0x02,… the TX harness emits. --echo passes the exact bytes
+    it sent so the check asserts the FPGA echoed the payload back unchanged.
+    """
     ok = True
 
     def fail(msg):
@@ -153,7 +186,7 @@ def check_datagram(payload, app_len, verbose=True):
     # zero-padding (present when the datagram is shorter than the 46-byte min
     # Ethernet payload) is naturally excluded.
     app = payload[28:total_length]
-    exp = expected_app(app_len)
+    exp = expected_app(app_len) if expected is None else bytes(expected)
     if verbose:
         print(f"  src {got_src_ip}:0x{sport:04x} -> dst {got_dst_ip}:0x{dport:04x}"
               f"  udp_len={ulen}  app={len(app)}B")
@@ -165,17 +198,19 @@ def check_datagram(payload, app_len, verbose=True):
     return ok
 
 
+def is_fpga(pkt):
+    """True for a frame emitted by the FPGA (our src MAC + IPv4 ethertype)."""
+    return (
+        Ether in pkt
+        and pkt[Ether].src.lower() == FPGA_SRC_MAC
+        and pkt[Ether].type == ETHERTYPE
+    )
+
+
 def validate(iface, app_len, count):
     print(f"Sniffing {iface} for FPGA frames (src {FPGA_SRC_MAC}, ethertype 0x{ETHERTYPE:04x})")
     print(f"Press btn[3] on the board to emit a datagram. Waiting for {count}...\n")
     seen = {"n": 0, "pass": 0}
-
-    def is_fpga(pkt):
-        return (
-            Ether in pkt
-            and pkt[Ether].src.lower() == FPGA_SRC_MAC
-            and pkt[Ether].type == ETHERTYPE
-        )
 
     def handle(pkt):
         seen["n"] += 1
@@ -190,36 +225,94 @@ def validate(iface, app_len, count):
     return seen["pass"] == seen["n"] and seen["n"] > 0
 
 
-# ── send (host -> FPGA, RX-path stub) ─────────────────────────────────────────
-def send(iface, app_len, count):
-    print("NOTE: --send targets the FPGA RX path, whose parser (Udp.Make) is still")
-    print("      WIP and NOT yet validatable. This just puts a well-formed datagram")
-    print("      on the wire so the tooling is ready for that work.\n")
-    app = expected_app(app_len)
+# ── send (host -> FPGA, RX path) ──────────────────────────────────────────────
+def send(iface, app_len, count, pattern):
+    app = make_payload(pattern, app_len)
     frame = Ether(dst=FPGA_DST_MAC, src="de:ad:be:ef:00:02", type=ETHERTYPE) / Raw(
         build_datagram(app)
     )
     print(f"Sending on {iface}: ethertype 0x{ETHERTYPE:04x}, "
-          f"{SRC_IP}:0x{SRC_PORT:04x} -> {DST_IP}:0x{DST_PORT:04x}, app={app_len}B")
+          f"{SRC_IP}:0x{SRC_PORT:04x} -> {DST_IP}:0x{DST_PORT:04x}, "
+          f"app={app_len}B (pattern={pattern})")
     print(f"  app payload: {hexdump(app)}")
     sendp(frame, iface=iface, count=count, verbose=True)
+
+    # Confirmation is on the board (udp_rx_mac_top_validation_harness); no host
+    # readback yet. Print the LED checklist so it's clear what a PASS looks like.
+    print("\nConfirm on the RX board harness (udp_rx_mac_top_validation_harness):")
+    print("  led0_g  saw_valid_datagram  -> lights and stays lit")
+    print("  led2_g  checksum_ok (IPv4)  -> lit")
+    print("  led2_r / led3_r  crc_error  -> DARK (good frame)")
+    print("  led[3:0] steps through the recovered payload low-nibbles, ~1/sec:")
+    if pattern == "alt":
+        print("           toggles 0xA <-> 0x5   (0xAA/0x55 alternating)")
+    else:
+        print("           0x1, 0x2, 0x3, …      (incrementing)")
+
+
+# ── echo (host -> FPGA -> host, loopback RX+TX path) ──────────────────────────
+def echo(iface, app_len, count, pattern, timeout):
+    """Send a datagram and assert the FPGA echoes it back with the SAME payload.
+
+    This closes the loop: the loopback harness (udp_loopback_validation_harness)
+    parses the received datagram and feeds the recovered app payload straight back
+    out through the RX->TX bridge, re-wrapping it in fresh IPv4/UDP/Ethernet
+    framing. So a PASS means the whole MAC->IPv4->UDP RX chain AND the UDP->IPv4->MAC
+    TX chain are byte-correct — host-asserted, no LED eyeballing.
+    """
+    app = make_payload(pattern, app_len)
+    frame = Ether(dst=FPGA_DST_MAC, src="de:ad:be:ef:00:02", type=ETHERTYPE) / Raw(
+        build_datagram(app)
+    )
+    print(f"Echo test on {iface}: send {app_len}B (pattern={pattern}), "
+          f"expect the FPGA to echo it back within {timeout}s")
+    print(f"  app payload sent: {hexdump(app)}\n")
+
+    n_pass = 0
+    for k in range(count):
+        # start sniffing BEFORE sending — the echo returns in microseconds. Filter
+        # to FPGA-sourced frames so our own outgoing frame is ignored.
+        sniffer = AsyncSniffer(iface=iface, lfilter=is_fpga, count=1, store=True)
+        sniffer.start()
+        sendp(frame, iface=iface, count=1, verbose=False)
+        pkts = sniffer.join(timeout=timeout) or sniffer.results
+        print(f"-- echo {k + 1}/{count} --")
+        if not pkts:
+            print(f"  FAIL: no echo within {timeout}s")
+            print()
+            continue
+        payload = bytes(pkts[0][Ether].payload)
+        if check_datagram(payload, app_len, expected=app):
+            n_pass += 1
+        print()
+
+    print(f"==== {n_pass}/{count} echoes passed ====")
+    return n_pass == count and count > 0
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--validate", action="store_true", help="sniff + check FPGA-emitted UDP datagrams (TX path)")
-    mode.add_argument("--send", action="store_true", help="send a UDP datagram to the FPGA (RX path, stub)")
+    mode.add_argument("--send", action="store_true", help="send a UDP datagram to the FPGA (RX path)")
+    mode.add_argument("--echo", action="store_true", help="send a datagram + assert the FPGA echoes it back (loopback path)")
     ap.add_argument("--iface", default=DEFAULT_IFACE, help=f"network interface (default {DEFAULT_IFACE})")
     ap.add_argument("--app-len", type=int, default=DEFAULT_APP_LEN, help=f"application payload length (default {DEFAULT_APP_LEN})")
-    ap.add_argument("--count", type=int, default=1, help="frames to capture/send (default 1)")
+    ap.add_argument("--count", type=int, default=1, help="frames to capture/send/echo (default 1)")
+    ap.add_argument("--timeout", type=float, default=2.0, help="--echo: seconds to wait for each echo (default 2.0)")
+    ap.add_argument("--pattern", choices=("inc", "alt"), default="inc",
+                    help="--send/--echo payload pattern: 'inc' incrementing (default), "
+                         "'alt' alternating 0xAA/0x55 (led[3:0] toggles 0xA<->0x5)")
     args = ap.parse_args()
 
     if args.validate:
         ok = validate(args.iface, args.app_len, args.count)
         sys.exit(0 if ok else 1)
+    elif args.echo:
+        ok = echo(args.iface, args.app_len, args.count, args.pattern, args.timeout)
+        sys.exit(0 if ok else 1)
     else:
-        send(args.iface, args.app_len, args.count)
+        send(args.iface, args.app_len, args.count, args.pattern)
 
 
 if __name__ == "__main__":
