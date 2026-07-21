@@ -1,3 +1,14 @@
+(*
+  Jane Street
+  Author: Bohdan Purtell
+
+  Testbench: "rx_controller_tb.ml"
+
+  Alcotest Stanza Inclusions: 
+
+
+ *)
+
 open! Core
 open! Hardcaml
 open! Mii_of_hardcaml
@@ -5,6 +16,18 @@ open! Mii_of_hardcaml
 let () = print_endline "=== Running MAC RX Controller Testbench ==="
 
 module Sim = Cyclesim.With_interface (Rx_controller.I) (Rx_controller.O)
+
+(* maybe take these out? *)
+
+type scenario = 
+  {
+    disjoint_nibbles : int list
+    ; zero_length_stream : int list
+    ; one_length_stream : int list
+    ; max_length_stream : int list
+  }
+
+
 
 let () =
   let scope = Scope.create ~flatten_design:true ~auto_label_hierarchical_ports:true () in
