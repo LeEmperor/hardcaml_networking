@@ -13,6 +13,7 @@ open! Signal
      dune exec lib/common/generate.exe -- validation
      dune exec lib/common/generate.exe -- udp-tx-validation
      dune exec lib/common/generate.exe -- udp-rx-validation
+     dune exec lib/common/generate.exe -- udp-loopback-validation
 
    Targets:
      mac                    standalone Ethernet MAC        -> hardcaml_eth_mac.v
@@ -21,10 +22,11 @@ open! Signal
      udp-tx-validation      board UDP TX harness (fpga->laptop, btn[3]) -> validation/udp_mac_top_validation_harness.v
      udp-rx-validation      board UDP RX harness (laptop->fpga, 1B/s drain) -> validation/udp_rx_mac_top_validation_harness.v
      udp-duplex-validation  board full-duplex UDP harness, DECOUPLED TX+RX -> validation/udp_duplex_validation_harness.v
+     udp-loopback-validation board echo/loopback UDP harness, RX->TX bridge -> validation/udp_loopback_validation_harness.v
 
    Naming: the UDP full-duplex tops are distinguished by coupling --
      duplex   = independent TX + RX side-by-side on one Mac_top (no coupling)
-     loopback = RX->TX bridge (echo); Phase 1, not yet built.
+     loopback = RX->TX bridge (echo); host-asserted RX validation.
 
    The board-harness targets instantiate the same tops that used to live in
    validation/generate_validation.exe (now folded in here). *)
@@ -56,6 +58,11 @@ module Circ_udp_duplex_validation =
   Circuit.With_interface
     (Udp_duplex_validation_harness.I)
     (Udp_duplex_validation_harness.O)
+
+module Circ_udp_loopback_validation =
+  Circuit.With_interface
+    (Udp_loopback_validation_harness.I)
+    (Udp_loopback_validation_harness.O)
 
 (* Emit [circ] as hierarchical Verilog at [path]. [path] is resolved against the
    repo root: DUNE_SOURCEROOT is set by [dune exec] so the RTL always lands at a
@@ -142,6 +149,19 @@ let udp_duplex_validation_cmd =
            (Udp_duplex_validation_harness.create scope)))
 ;;
 
+let udp_loopback_validation_cmd =
+  target
+    ~summary:
+      "board echo/loopback UDP harness, RX->TX bridge -> \
+       validation/udp_loopback_validation_harness.v"
+    ~build:(fun scope ->
+      emit
+        ~path:"validation/udp_loopback_validation_harness.v"
+        (Circ_udp_loopback_validation.create_exn
+           ~name:"udp_loopback_validation_harness"
+           (Udp_loopback_validation_harness.create scope)))
+;;
+
 let () =
   Command_unix.run
     (Command.group
@@ -152,5 +172,6 @@ let () =
        ; "udp-tx-validation", udp_tx_validation_cmd
        ; "udp-rx-validation", udp_rx_validation_cmd
        ; "udp-duplex-validation", udp_duplex_validation_cmd
+       ; "udp-loopback-validation", udp_loopback_validation_cmd
        ])
 ;;
