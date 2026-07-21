@@ -17,18 +17,6 @@ let () = print_endline "=== Running MAC RX Controller Testbench ==="
 
 module Sim = Cyclesim.With_interface (Rx_controller.I) (Rx_controller.O)
 
-(* maybe take these out? *)
-
-type scenario = 
-  {
-    disjoint_nibbles : int list
-    ; zero_length_stream : int list
-    ; one_length_stream : int list
-    ; max_length_stream : int list
-  }
-
-
-
 let () =
   let scope = Scope.create ~flatten_design:true ~auto_label_hierarchical_ports:true () in
   let sim = Sim.create (Rx_controller.create scope) in
