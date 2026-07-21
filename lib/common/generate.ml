@@ -11,16 +11,20 @@ open! Signal
      dune exec lib/common/generate.exe -- mac
      dune exec lib/common/generate.exe -- udp
      dune exec lib/common/generate.exe -- validation
-     dune exec lib/common/generate.exe -- udp-validation
+     dune exec lib/common/generate.exe -- udp-tx-validation
      dune exec lib/common/generate.exe -- udp-rx-validation
 
    Targets:
-     mac                standalone Ethernet MAC            -> hardcaml_eth_mac.v
-     udp                UDP-over-MAC stack                 -> hardcaml_udp_with_mac.v
-     validation         board MAC validation harness       -> validation/mac_top_validation_harness.v
-     udp-validation     board UDP-over-MAC TX validation harness -> validation/udp_mac_top_validation_harness.v
-     udp-rx-validation  board UDP-over-MAC RX validation harness -> validation/udp_rx_mac_top_validation_harness.v
-     udp-duplex-validation  board full-duplex (indep TX+RX) harness -> validation/udp_duplex_validation_harness.v
+     mac                    standalone Ethernet MAC        -> hardcaml_eth_mac.v
+     udp                    UDP-over-MAC stack             -> hardcaml_udp_with_mac.v
+     validation             board MAC harness (bare MAC, both dirs) -> validation/mac_top_validation_harness.v
+     udp-tx-validation      board UDP TX harness (fpga->laptop, btn[3]) -> validation/udp_mac_top_validation_harness.v
+     udp-rx-validation      board UDP RX harness (laptop->fpga, 1B/s drain) -> validation/udp_rx_mac_top_validation_harness.v
+     udp-duplex-validation  board full-duplex UDP harness, DECOUPLED TX+RX -> validation/udp_duplex_validation_harness.v
+
+   Naming: the UDP full-duplex tops are distinguished by coupling --
+     duplex   = independent TX + RX side-by-side on one Mac_top (no coupling)
+     loopback = RX->TX bridge (echo); Phase 1, not yet built.
 
    The board-harness targets instantiate the same tops that used to live in
    validation/generate_validation.exe (now folded in here). *)
@@ -89,7 +93,8 @@ let udp_cmd =
 
 let validation_cmd =
   target
-    ~summary:"board-level MAC validation harness -> validation/mac_top_validation_harness.v"
+    ~summary:
+      "board MAC harness (bare MAC, both dirs) -> validation/mac_top_validation_harness.v"
     ~build:(fun scope ->
       emit
         ~path:"validation/mac_top_validation_harness.v"
@@ -98,10 +103,11 @@ let validation_cmd =
            (Mac_top_validation_harness.create scope)))
 ;;
 
-let udp_validation_cmd =
+let udp_tx_validation_cmd =
   target
     ~summary:
-      "board UDP-over-MAC validation harness -> validation/udp_mac_top_validation_harness.v"
+      "board UDP TX harness (fpga->laptop, btn[3]) -> \
+       validation/udp_mac_top_validation_harness.v"
     ~build:(fun scope ->
       emit
         ~path:"validation/udp_mac_top_validation_harness.v"
@@ -113,7 +119,8 @@ let udp_validation_cmd =
 let udp_rx_validation_cmd =
   target
     ~summary:
-      "board UDP-over-MAC RX validation harness -> validation/udp_rx_mac_top_validation_harness.v"
+      "board UDP RX harness (laptop->fpga, 1B/s drain) -> \
+       validation/udp_rx_mac_top_validation_harness.v"
     ~build:(fun scope ->
       emit
         ~path:"validation/udp_rx_mac_top_validation_harness.v"
@@ -125,7 +132,8 @@ let udp_rx_validation_cmd =
 let udp_duplex_validation_cmd =
   target
     ~summary:
-      "board full-duplex UDP-over-MAC validation harness -> validation/udp_duplex_validation_harness.v"
+      "board full-duplex UDP harness, DECOUPLED TX+RX -> \
+       validation/udp_duplex_validation_harness.v"
     ~build:(fun scope ->
       emit
         ~path:"validation/udp_duplex_validation_harness.v"
@@ -141,7 +149,7 @@ let () =
        [ "mac", mac_cmd
        ; "udp", udp_cmd
        ; "validation", validation_cmd
-       ; "udp-validation", udp_validation_cmd
+       ; "udp-tx-validation", udp_tx_validation_cmd
        ; "udp-rx-validation", udp_rx_validation_cmd
        ; "udp-duplex-validation", udp_duplex_validation_cmd
        ])
