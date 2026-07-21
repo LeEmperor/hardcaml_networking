@@ -20,6 +20,7 @@ open! Signal
      validation         board MAC validation harness       -> validation/mac_top_validation_harness.v
      udp-validation     board UDP-over-MAC TX validation harness -> validation/udp_mac_top_validation_harness.v
      udp-rx-validation  board UDP-over-MAC RX validation harness -> validation/udp_rx_mac_top_validation_harness.v
+     udp-duplex-validation  board full-duplex (indep TX+RX) harness -> validation/udp_duplex_validation_harness.v
 
    The board-harness targets instantiate the same tops that used to live in
    validation/generate_validation.exe (now folded in here). *)
@@ -46,6 +47,11 @@ module Circ_udp_rx_validation =
   Circuit.With_interface
     (Udp_rx_mac_top_validation_harness.I)
     (Udp_rx_mac_top_validation_harness.O)
+
+module Circ_udp_duplex_validation =
+  Circuit.With_interface
+    (Udp_duplex_validation_harness.I)
+    (Udp_duplex_validation_harness.O)
 
 (* Emit [circ] as hierarchical Verilog at [path]. [path] is resolved against the
    repo root: DUNE_SOURCEROOT is set by [dune exec] so the RTL always lands at a
@@ -116,6 +122,18 @@ let udp_rx_validation_cmd =
            (Udp_rx_mac_top_validation_harness.create scope)))
 ;;
 
+let udp_duplex_validation_cmd =
+  target
+    ~summary:
+      "board full-duplex UDP-over-MAC validation harness -> validation/udp_duplex_validation_harness.v"
+    ~build:(fun scope ->
+      emit
+        ~path:"validation/udp_duplex_validation_harness.v"
+        (Circ_udp_duplex_validation.create_exn
+           ~name:"udp_duplex_validation_harness"
+           (Udp_duplex_validation_harness.create scope)))
+;;
+
 let () =
   Command_unix.run
     (Command.group
@@ -125,5 +143,6 @@ let () =
        ; "validation", validation_cmd
        ; "udp-validation", udp_validation_cmd
        ; "udp-rx-validation", udp_rx_validation_cmd
+       ; "udp-duplex-validation", udp_duplex_validation_cmd
        ])
 ;;
