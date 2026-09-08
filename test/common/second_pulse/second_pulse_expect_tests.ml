@@ -15,6 +15,8 @@
 
 open! Core
 open! Second_pulse_testbench
+open! Hardcaml_networking
+open! Common
 
 (* One character per driven cycle. *)
 let print_trace observations =

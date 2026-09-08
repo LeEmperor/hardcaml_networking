@@ -11,9 +11,9 @@
  * bare-MAC [mac_validation_harness], which already drives a btn[3] TX burst and
  * a 1-byte/sec RX drain side-by-side on a single [Mac_top].
  *
- *     btn TX app ─→ Udp_tx ─→ Ipv4_tx ─→ Mac_top.s_axis ─→ PHY TX   (fpga -> laptop)
+ *     btn TX app ─→ Udp_tx ─→ Ipv4_tx ─→ Mii.Mac_top.s_axis ─→ PHY TX   (fpga -> laptop)
  *                                          (one Mac_top)
- *        app out ◀─ Udp_rx ◀─ Ipv4_rx ◀─ Mac_top.m_axis ◀─ PHY RX   (laptop -> fpga)
+ *        app out ◀─ Udp_rx ◀─ Ipv4_rx ◀─ Mii.Mac_top.m_axis ◀─ PHY RX   (laptop -> fpga)
  *
  * Both composition stacks run in the tx_clock domain (the MAC captures PHY RX in
  * rx_clock, then its async RX FIFO presents [m_axis] in tx_clock), so the whole
@@ -31,8 +31,6 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Mii_of_hardcaml
-open! Ipv4_of_hardcaml
 
 (* ── TX endpoints (mirror Udp_mac_top) ─────────────────────────────────────── *)
 module Udp_cfg = struct
@@ -124,7 +122,7 @@ let create ?(rx_fifo_for_sim = false) (scope : Scope.t) (i : _ I.t) : _ O.t =
   (* ── Wire stubs breaking every backpressure combinational loop ───────────── *)
   (* TX stack (mirrors Udp_mac_top) *)
   let wire_mac_tready = Signal.wire 1 in
-  (* MAC.s_axis_tready -> Ipv4_tx.mac_tready *)
+  (* MAC.s_axis_tready -> Ipv4.Ipv4_tx.mac_tready *)
   (* RX stack (mirrors Udp_rx_mac_top) *)
   let wire_mac_rready = Signal.wire 1 in
   let tx_path =
@@ -143,11 +141,11 @@ let create ?(rx_fifo_for_sim = false) (scope : Scope.t) (i : _ I.t) : _ O.t =
   in
   (* ── L2: ONE shared MAC, both directions wired ───────────────────────────── *)
   let mac =
-    Mac_top.hierarchical
+    Mii.Mac_top.hierarchical
       ~rx_fifo_for_sim
       ~ethertype:0x0800
       scope
-      { Mac_top.I.rx_clock = i.rx_clock
+      { Mii.Mac_top.I.rx_clock = i.rx_clock
       ; rx_reset = i.rx_reset
       ; tx_clock = i.tx_clock
       ; tx_reset = i.tx_reset

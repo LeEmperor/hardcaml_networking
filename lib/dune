@@ -1,0 +1,26 @@
+; University of Florida
+; Author: Bohdan Purtell
+; Module: "dune"
+; The whole synthesizable surface of this repository, as ONE wrapped library.
+;
+; (include_subdirs qualified) makes each subdirectory a sub-namespace, so a consumer
+; writes `open! Hardcaml_networking` and reaches blocks as Mii.Mac_top,
+; Udp.Udp_rx_64_mac_top, Common.Clk_div and so on. The package therefore owns exactly
+; one global module name. Inside the library, references within a directory stay bare;
+; references across one take the directory prefix.
+;
+; Nothing but library code belongs under lib/ now -- the RTL generator lives in bin/,
+; because include_subdirs claims this entire subtree for the stanza below.
+
+(include_subdirs qualified)
+
+(library
+ (name hardcaml_networking)
+ (public_name hardcaml_networking)
+ (libraries core hardcaml hardcaml_circuits)
+ (preprocess
+  (pps ppx_hardcaml ppx_jane))
+ (lint
+  (pps ppx_js_style))
+ (flags
+  (:standard -w -27-57-33-34-35-40-63-47-26)))

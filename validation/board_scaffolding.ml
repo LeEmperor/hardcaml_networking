@@ -17,6 +17,8 @@
 open! Core
 open! Hardcaml
 open! Signal
+open! Hardcaml_networking
+open! Common
 
 (* Per-domain reset synchronizer. btn[0] is a raw asynchronous input, so drop it through a
    2-FF chain in the target clock domain. Async-assert (the FFs reset to 1 the instant

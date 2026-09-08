@@ -5,7 +5,7 @@
    IPv4 (OSI layer 3) receive header parser. Sits *between* the MII MAC (L2) and a layer-4
    protocol (UDP/TCP):
 
-   Mac_top.m_axis ─(Eth payload byte stream + sideband)→ Ipv4_rx ─→ L4 (Udp_rx/…)
+   Mii.Mac_top.m_axis ─(Eth payload byte stream + sideband)→ Ipv4_rx ─→ L4 (Udp_rx/…)
 
    The MAC hands up the Ethernet *payload* as an AXI-Stream (m_axis_tdata/tvalid/
    tlast/tuser) plus two sidebands this block relies on:
@@ -47,7 +47,7 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Helper_circuits
+open! Common.Helper_circuits
 
 let ip_hdr_len = 20
 let ipv4_ethertype = 0x0800
@@ -69,7 +69,7 @@ module Make (C : Config) = struct
       { clock : 'a
       ; reset : 'a
       ; en : 'a
-      ; (* from Mac_top.m_axis (Ethernet-payload byte stream + sideband) *)
+      ; (* from Mii.Mac_top.m_axis (Ethernet-payload byte stream + sideband) *)
         rx_tdata : 'a [@bits 8]
       ; rx_tvalid : 'a
       ; rx_tlast : 'a (* final Ethernet-payload byte of the frame *)

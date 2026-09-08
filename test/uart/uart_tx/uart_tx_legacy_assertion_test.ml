@@ -16,8 +16,9 @@
 
 open! Core
 open! Hardcaml
-open! Uart_of_hardcaml
 open! Hardcaml_waveterm
+open! Hardcaml_networking
+open! Uart
 
 let () = print_endline "=== Running UART TX Top Testbench ==="
 

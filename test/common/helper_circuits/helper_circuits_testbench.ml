@@ -41,6 +41,8 @@ open! Hardcaml
 open! Signal
 open! Hardcaml_step_testbench
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Common
 
 (* The delay depths the wrapper instantiates. Three is deep enough that an off-by-one in
    [delay_by]'s recursion shows up as a different column rather than as a sign flip, and

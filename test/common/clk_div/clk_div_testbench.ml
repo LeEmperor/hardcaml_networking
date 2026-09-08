@@ -38,6 +38,8 @@ open! Core
 open! Hardcaml
 open! Hardcaml_step_testbench
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Common
 module Dut = Clk_div
 
 (* One driven cycle's worth of stimulus. [rst] is the register spec's synchronous clear

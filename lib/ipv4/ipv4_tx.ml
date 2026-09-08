@@ -38,7 +38,7 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Helper_circuits
+open! Common.Helper_circuits
 
 let ip_hdr_len = 20
 

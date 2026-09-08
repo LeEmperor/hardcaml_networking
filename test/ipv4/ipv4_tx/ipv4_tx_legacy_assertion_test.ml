@@ -53,9 +53,10 @@
 
 open! Core
 open! Hardcaml
-open! Ipv4_of_hardcaml
 open! Hardcaml_waveterm
 open! Helper_tb_functions
+open! Hardcaml_networking
+open! Ipv4
 
 let () = print_endline "=== Running IPv4 TX Testbench ==="
 

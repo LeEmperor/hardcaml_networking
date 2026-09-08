@@ -17,6 +17,8 @@
 open! Core
 open! Hardcaml
 open! Hardcaml_waveterm
+open! Hardcaml_networking
+open! Common
 
 let () = print_endline "=== Running Second_pulse Testbench ==="
 

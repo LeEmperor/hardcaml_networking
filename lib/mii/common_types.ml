@@ -7,7 +7,7 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Helper_circuits
+open! Common.Helper_circuits
 
 module States = struct
   type t =

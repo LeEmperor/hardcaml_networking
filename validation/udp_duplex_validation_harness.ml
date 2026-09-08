@@ -30,8 +30,10 @@
 
 open! Core
 open! Hardcaml
-open! Udp_of_hardcaml (* Udp_duplex_mac_top *)
 open! Signal
+open! Hardcaml_networking
+open! Common
+open! Udp
 
 (*
  * One-shot btn[3] TX trigger — identical to the TX harness:

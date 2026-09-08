@@ -1,21 +1,15 @@
 ; MAC validation harness — board-level scaffolding kept OUTSIDE lib/.
-; Reuses Arty_board_top.I/O (helper_circuits) as its pin contract and drives
-; Mac_top (mii_of_hardcaml). generate_validation.exe emits the harness RTL.
+; Reuses Arty_board_top.I/O (hardcaml_networking) as its pin contract and drives
+; Mac_top (hardcaml_networking). generate_validation.exe emits the harness RTL.
 
 ; The MAC validation harness library. Its RTL is now emitted by the unified
-; generator: `dune exec lib/common/generate.exe -- validation`
-; (the former generate_validation.exe was folded into lib/common/generate.ml).
+; generator: `dune exec bin/generate.exe -- validation`
+; (the former generate_validation.exe was folded into bin/generate.ml).
 
 (library
  (name mac_validation)
  (wrapped false)
- (libraries
-  core
-  hardcaml
-  helper_circuits
-  mii_of_hardcaml
-  udp_of_hardcaml
-  hardcaml_circuits)
+ (libraries core hardcaml hardcaml_networking hardcaml_circuits)
  (modules
   board_scaffolding
   mac_validation_harness

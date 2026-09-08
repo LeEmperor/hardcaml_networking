@@ -16,7 +16,7 @@
  (libraries
   core
   hardcaml
-  mii_of_hardcaml
+  hardcaml_networking
   hardcaml_waveterm
   helper_tb_functions
   hardcaml_step_testbench
@@ -34,7 +34,7 @@
  (libraries
   core
   hardcaml
-  mii_of_hardcaml
+  hardcaml_networking
   hardcaml_waveterm
   helper_tb_functions
   hardcaml_step_testbench)

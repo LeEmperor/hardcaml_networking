@@ -2,6 +2,8 @@ open! Core
 open! Hardcaml
 open! Hardcaml_step_testbench
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Common
 module Dut = Axis_width_adapter_8_to_64
 
 module Source_beat = struct

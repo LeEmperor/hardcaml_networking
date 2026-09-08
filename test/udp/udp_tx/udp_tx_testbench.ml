@@ -62,9 +62,10 @@
 
 open! Core
 open! Hardcaml
-open! Udp_of_hardcaml
 open! Hardcaml_step_testbench
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Udp
 module Dut = Udp_tx
 
 let header_length = Ip_udp.Udp.header_length

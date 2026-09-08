@@ -90,7 +90,7 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
   eth_type_reg_en <-- controller.eth_type_reg_en;
   emit_payload <-- controller.emit_payload;
   fcs_present <-- controller.fcs_present;
-  let frame_end = Helper_circuits.falling_edge_detector spec i.rx_dv_i in
+  let frame_end = Common.Helper_circuits.falling_edge_detector spec i.rx_dv_i in
   (* [rx_dv] drops before byte-valid fires for the final FCS byte. Extending the CRC
      enable through [frame_end] lets that byte settle before the result is sampled. *)
   let crc_en = ~:(controller.in_preamble) &: (i.rx_dv_i |: frame_end) &: en in

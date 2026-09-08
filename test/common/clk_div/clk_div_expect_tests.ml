@@ -19,6 +19,8 @@
 
 open! Core
 open! Clk_div_testbench
+open! Hardcaml_networking
+open! Common
 
 (* One character per driven cycle, so a golden reads like a waveform row. *)
 let trace_string observations =

@@ -61,9 +61,10 @@
 
 open! Core
 open! Hardcaml
-open! Ipv4_of_hardcaml
 open! Hardcaml_step_testbench
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Ipv4
 module Dut = Ipv4_tx
 
 (* IP protocol numbers, the two the block is ever handed. *)

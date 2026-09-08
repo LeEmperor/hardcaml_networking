@@ -10,7 +10,7 @@ in the repo history.
 
 ## Why copies
 
-`lib/common/generate.ml` writes each target to a fixed repo-relative path
+`bin/generate.ml` writes each target to a fixed repo-relative path
 (`hardcaml_eth_mac.v`, `validation/*_validation_harness.v`). Those paths are baked into
 the generator, referenced by the top-level README, and are where Vivado picks the RTL
 up. Moving the originals in here would break regeneration and the board project. Always

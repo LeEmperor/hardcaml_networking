@@ -1,0 +1,26 @@
+; University of Florida
+; Author: Bohdan Purtell
+; Module: "dune"
+; RTL generation entry point. Moved out of lib/common/ when lib/ became a single
+; (include_subdirs qualified) library: that stanza claims the whole lib/ subtree, so an
+; executable can no longer sit inside it.
+
+(executables
+ (modes byte exe)
+ (names generate)
+ (libraries
+  core.command
+  core_unix.command_unix
+  core
+  hardcaml
+  jane_rope
+  hardcaml_networking
+  mac_validation)
+ (modules generate)
+ (flags
+  (:standard -w -27-57-33-34-35-40-63-47-26))
+ (preprocess
+  (pps ppx_jane))
+ (lint
+  (pps ppx_js_style))
+ (promote))

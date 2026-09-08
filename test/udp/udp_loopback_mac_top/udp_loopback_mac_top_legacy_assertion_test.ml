@@ -34,8 +34,9 @@
 
 open! Core
 open! Hardcaml
-open! Udp_of_hardcaml
 open! Helper_tb_functions
+open! Hardcaml_networking
+open! Udp
 
 let () = print_endline "=== Running UDP Loopback (echo) Integration Testbench ==="
 

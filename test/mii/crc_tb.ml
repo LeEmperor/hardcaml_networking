@@ -1,8 +1,9 @@
 open! Core
 open! Hardcaml
-open! Mii_of_hardcaml
 open! Hardcaml_waveterm
 open! Helper_tb_functions
+open! Hardcaml_networking
+open! Mii
 
 let waveform_enabled = Array.exists (Sys.get_argv ()) ~f:(String.equal "--waveform")
 let () = print_endline "=== Running MAC CRC Testbench ==="

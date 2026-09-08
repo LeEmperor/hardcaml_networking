@@ -12,9 +12,10 @@
 
 open! Core
 open! Hardcaml
-open! Ipv4_of_hardcaml
-open! Udp_of_hardcaml
 open! Helper_tb_functions
+open! Hardcaml_networking
+open! Ipv4
+open! Udp
 
 let () = print_endline "=== Running IPv4+UDP RX Integration Testbench ==="
 let hi8 x = (x lsr 8) land 0xFF

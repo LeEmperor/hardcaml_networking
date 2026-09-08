@@ -14,8 +14,6 @@
 open! Core
 open! Alcotest
 open! Hardcaml
-open! Mii_of_hardcaml
-open! Udp_of_hardcaml
 
 (* module Dut = struct *)
 (**)

@@ -18,7 +18,7 @@
  (libraries
   core
   hardcaml
-  udp_of_hardcaml
+  hardcaml_networking
   hardcaml_waveterm
   helper_tb_functions
   hardcaml_step_testbench
@@ -39,7 +39,7 @@
  (libraries
   core
   hardcaml
-  udp_of_hardcaml
+  hardcaml_networking
   hardcaml_waveterm
   helper_tb_functions)
  (preprocess

@@ -6,17 +6,17 @@
    MAC (L2, Mac_top). This module owns the *wiring*, so the layering stays
    one-directional:
 
-   Udp_tx ─(UDP datagram + meta)→ Ipv4_tx ─(Eth payload AXI-S)→ Mac_top.s_axis ─→ PHY
+   Udp_tx ─(UDP datagram + meta)→ Ipv4_tx ─(Eth payload AXI-S)→ Mii.Mac_top.s_axis ─→ PHY
 
    Each layer only knows the one below it:
-   - Udp_tx hands its datagram bytes + [{ip_start, l4_length, protocol}] to Ipv4_tx.
+   - Udp_tx hands its datagram bytes + [{ip_start, l4_length, protocol}] to Ipv4.Ipv4_tx.
    - Ipv4_tx prepends the IPv4 header and drives Mac_top's s_axis.
    - The MAC knows nothing about IP or UDP — [mii_of_hardcaml] has no dependency on this
      library or on ipv4_of_hardcaml. "Including a UDP/IP stack" is a question of *what you
      instantiate around the MAC*, not a flag on the MAC.
 
    Backpressure flows the other way through two wire stubs that break the combinational
-   loops: MAC.s_axis_tready → Ipv4_tx.mac_tready, and Ipv4_tx.l4_tready →
+   loops: MAC.s_axis_tready → Ipv4.Ipv4_tx.mac_tready, and Ipv4.Ipv4_tx.l4_tready →
    Udp_tx.l4_tready.
 
    Everything here lives in the tx_clock domain (the MAC's TX side); the RX path is passed
@@ -30,8 +30,6 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Mii_of_hardcaml
-open! Ipv4_of_hardcaml
 
 (* fixed endpoints for the first bring-up *)
 module Udp_cfg = struct
@@ -113,11 +111,11 @@ let create ?(rx_fifo_for_sim = false) (scope : Scope.t) (i : _ I.t) : _ O.t =
   in
   (* L2: Ethernet framing + FCS. ethertype 0x0800 = IPv4. *)
   let mac =
-    Mac_top.hierarchical
+    Mii.Mac_top.hierarchical
       ~rx_fifo_for_sim
       ~ethertype:0x0800
       scope
-      { Mac_top.I.rx_clock = i.rx_clock
+      { Mii.Mac_top.I.rx_clock = i.rx_clock
       ; rx_reset = i.rx_reset
       ; tx_clock = i.tx_clock
       ; tx_reset = i.tx_reset

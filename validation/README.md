@@ -40,7 +40,7 @@ then a single direction, then duplex or loopback.
 From the repository root:
 
 ```bash
-./scripts/with-switch.sh dune exec lib/common/generate.exe -- udp-duplex-validation
+./scripts/with-switch.sh dune exec bin/generate.exe -- udp-duplex-validation
 ./scripts/with-switch.sh dune runtest test/udp/udp_duplex_mac_top
 ```
 
@@ -298,7 +298,7 @@ notes above. Only the generate command, controls, and LED map differ.
 The first bring-up step: no IPv4 or UDP, just the MII MAC in both directions.
 
 ```bash
-./scripts/with-switch.sh dune exec lib/common/generate.exe -- mac-validation
+./scripts/with-switch.sh dune exec bin/generate.exe -- mac-validation
 ```
 
 Emits `validation/mac_validation_harness.v`; use `mac_validation_harness` as the synthesis
@@ -349,7 +349,7 @@ Adds the IPv4 and UDP TX headers on top of the MAC; the RX path is the bare MAC 
 received bytes are raw Ethernet payload rather than recovered UDP payload.
 
 ```bash
-./scripts/with-switch.sh dune exec lib/common/generate.exe -- udp-tx-validation
+./scripts/with-switch.sh dune exec bin/generate.exe -- udp-tx-validation
 ```
 
 Emits `validation/udp_tx_validation_harness.v`; synthesis top `udp_tx_validation_harness`.
@@ -383,7 +383,7 @@ The mirror image: the full MAC to IPv4 to UDP receive chain, with the MII TX pin
 Nothing is ever transmitted, so there is no `btn[3]` stimulus.
 
 ```bash
-./scripts/with-switch.sh dune exec lib/common/generate.exe -- udp-rx-validation
+./scripts/with-switch.sh dune exec bin/generate.exe -- udp-rx-validation
 ```
 
 Emits `validation/udp_rx_validation_harness.v`; synthesis top `udp_rx_validation_harness`.
@@ -419,7 +419,7 @@ For a host-asserted test of both directions without relying on the payload LEDs,
 and program the loopback harness:
 
 ```bash
-./scripts/with-switch.sh dune exec lib/common/generate.exe -- udp-loopback-validation
+./scripts/with-switch.sh dune exec bin/generate.exe -- udp-loopback-validation
 ```
 
 Then run:
