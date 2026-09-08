@@ -1,5 +1,6 @@
 (library
  (name udp_of_hardcaml)
+ (public_name hardcaml_networking.udp)
  ; (modules Udp)
  (libraries
   core

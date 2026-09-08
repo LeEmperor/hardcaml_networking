@@ -1,5 +1,6 @@
 (library
  (name ipv4_of_hardcaml)
+ (public_name hardcaml_networking.ipv4)
  ; (modules ipv4_rx ipv4_tx)
  (libraries core hardcaml helper_circuits hardcaml_circuits)
  (preprocess
