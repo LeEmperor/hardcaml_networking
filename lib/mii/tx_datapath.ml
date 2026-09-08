@@ -6,7 +6,7 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Helper_circuits
+open! Common.Helper_circuits
 open! Common_types
 
 module I = struct

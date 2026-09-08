@@ -1,6 +1,7 @@
 open! Core
 open! Hardcaml
-open! Udp_of_hardcaml
+open! Hardcaml_networking
+open! Udp
 
 module Duplex_circuit =
   Circuit.With_interface (Udp_duplex_mac_top.I) (Udp_duplex_mac_top.O)

@@ -1,6 +1,7 @@
 open! Core
 open! Hardcaml
-open! Mii_of_hardcaml
+open! Hardcaml_networking
+open! Mii
 module Mac_circuit = Circuit.With_interface (Mac_top.I) (Mac_top.O)
 module Rx_path_circuit = Circuit.With_interface (Mac_rx_path.I) (Mac_rx_path.O)
 module Tx_path_circuit = Circuit.With_interface (Mac_tx_path.I) (Mac_tx_path.O)

@@ -54,7 +54,7 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Helper_circuits
+open! Common.Helper_circuits
 
 let udp_hdr_len = 8
 let ip_proto_udp = 17
@@ -77,7 +77,7 @@ module Make (C : Config) = struct
       { clock : 'a
       ; reset : 'a
       ; en : 'a
-      ; (* from Ipv4_rx.m_axis (UDP datagram byte stream + sideband) *)
+      ; (* from Ipv4.Ipv4_rx.m_axis (UDP datagram byte stream + sideband) *)
         rx_tdata : 'a [@bits 8]
       ; rx_tvalid : 'a
       ; rx_tlast : 'a (* final datagram byte of the frame *)
@@ -87,8 +87,8 @@ module Make (C : Config) = struct
         ip_protocol : 'a [@bits 8]
       ; ip_src_ip : 'a [@bits 32]
       ; ip_dst_ip : 'a [@bits 32]
-      ; (* frame-level late status from Ipv4_rx (see Ipv4_rx.O.frame_done). Carries the
-           FCS/CRC verdict that cannot ride the payload tlast — forwarded up to the
+      ; (* frame-level late status from Ipv4_rx (see Ipv4.Ipv4_rx.O.frame_done). Carries
+           the FCS/CRC verdict that cannot ride the payload tlast — forwarded up to the
            application unchanged. *)
         ip_frame_done : 'a
       ; ip_frame_error : 'a
@@ -125,10 +125,10 @@ module Make (C : Config) = struct
              flag misses the FCS verdict for padded frames; use the frame-level
              [frame_done]/[frame_error] channel below. *)
       ; busy : 'a
-      ; (* frame-level late status, forwarded from Ipv4_rx (see Ipv4_rx.O.frame_done).
-           Latch [frame_error] on the [frame_done] pulse to get the app-visible bad-frame
-           (FCS/CRC) verdict, valid even when MAC padding delays it past the payload
-           tlast. *)
+      ; (* frame-level late status, forwarded from Ipv4_rx (see
+           Ipv4.Ipv4_rx.O.frame_done). Latch [frame_error] on the [frame_done] pulse to
+           get the app-visible bad-frame (FCS/CRC) verdict, valid even when MAC padding
+           delays it past the payload tlast. *)
         frame_done : 'a
       ; frame_error : 'a
       ; keep : 'a

@@ -129,14 +129,14 @@ mkdir -p waves && ./scripts/with-switch.sh dune exec test/mii/tx_path_tb.exe
 
 # Generating RTL
 
-`lib/common/generate.exe` emits Verilog, one subcommand per target, so there is no
+`bin/generate.exe` emits Verilog, one subcommand per target, so there is no
 comment-toggling of the generator source:
 
 ```sh
-./scripts/with-switch.sh dune exec lib/common/generate.exe -- mac
-./scripts/with-switch.sh dune exec lib/common/generate.exe -- udp
-./scripts/with-switch.sh dune exec lib/common/generate.exe -- udp-rx-64
-./scripts/with-switch.sh dune exec lib/common/generate.exe -- mac-validation
+./scripts/with-switch.sh dune exec bin/generate.exe -- mac
+./scripts/with-switch.sh dune exec bin/generate.exe -- udp
+./scripts/with-switch.sh dune exec bin/generate.exe -- udp-rx-64
+./scripts/with-switch.sh dune exec bin/generate.exe -- mac-validation
 ```
 
 | target | what it emits |
@@ -158,7 +158,7 @@ in `app_tdata_o[7:0]`; `app_tkeep_o[7:0]` marks valid lanes on the final beat, a
 and framing semantics. This reproduces the data interface, not 10G arrival timing: an Arty
 100 Mb/s PHY supplies bytes far more slowly than a 64-bit 10G MAC.
 
-Run `dune exec lib/common/generate.exe -- -help` for the current list. Output paths are
+Run `dune exec bin/generate.exe -- -help` for the current list. Output paths are
 resolved against the repo root, so the RTL lands in a stable place no matter where the
 binary ran.
 

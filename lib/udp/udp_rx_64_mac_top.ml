@@ -92,10 +92,10 @@ let create ?(rx_fifo_for_sim = false) (scope : Scope.t) (i : _ I.t) : _ O.t =
       }
   in
   let wide =
-    Axis_width_adapter_8_to_64.hierarchical
+    Common.Axis_width_adapter_8_to_64.hierarchical
       ~instance:"udp_payload_8_to_64"
       scope
-      { Axis_width_adapter_8_to_64.I.clock_i = i.tx_clock_i
+      { Common.Axis_width_adapter_8_to_64.I.clock_i = i.tx_clock_i
       ; reset_i = i.tx_reset_i
       ; en_i = i.en_i
       ; s_tdata_i = narrow.app_tdata

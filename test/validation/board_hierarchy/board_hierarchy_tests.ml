@@ -13,6 +13,8 @@
 
 open! Core
 open! Hardcaml
+open! Hardcaml_networking
+open! Common
 module Board_circuit = Circuit.With_interface (Arty_board_top.I) (Arty_board_top.O)
 
 type design =

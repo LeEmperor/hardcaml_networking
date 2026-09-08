@@ -15,9 +15,7 @@
  (libraries
   core
   hardcaml
-  mii_of_hardcaml
-  udp_of_hardcaml
-  ipv4_of_hardcaml
+  hardcaml_networking
   hardcaml_waveterm
   helper_tb_functions
   hardcaml_verif)
@@ -34,9 +32,7 @@
  (libraries
   core
   hardcaml
-  mii_of_hardcaml
-  udp_of_hardcaml
-  ipv4_of_hardcaml
+  hardcaml_networking
   hardcaml_waveterm
   helper_tb_functions)
  (preprocess

@@ -41,9 +41,10 @@
 
 open! Core
 open! Hardcaml
-open! Udp_of_hardcaml
 open! Hardcaml_waveterm
-open! Helper_tb_functions (* provides the (<--) : Bits.t ref -> int -> unit driver *)
+open! Helper_tb_functions
+open! Hardcaml_networking
+open! Udp
 
 let () = print_endline "=== Running UDP TX Testbench ==="
 

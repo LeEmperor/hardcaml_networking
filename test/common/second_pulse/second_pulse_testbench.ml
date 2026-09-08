@@ -35,6 +35,8 @@ open! Core
 open! Hardcaml
 open! Hardcaml_step_testbench
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Common
 module Dut = Second_pulse
 
 (* [rst] is the only input besides the clock, so a stimulus is one boolean per cycle. *)

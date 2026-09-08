@@ -1,7 +1,8 @@
 open! Core
 open! Async
-open! Mii_of_hardcaml
-open! Udp_of_hardcaml
+open! Hardcaml_networking
+open! Mii
+open! Udp
 module Reports = Hardcaml_xilinx_reports
 module Tx_crc_command = Reports.Command.With_interface (Tx_crc.I) (Tx_crc.O)
 module Rx_crc_command = Reports.Command.With_interface (Rx_crc.I) (Rx_crc.O)

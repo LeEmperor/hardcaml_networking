@@ -35,7 +35,7 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Helper_circuits
+open! Common.Helper_circuits
 
 let udp_hdr_len = 8
 let ip_proto_udp = 17
@@ -65,7 +65,7 @@ module Make (C : Config) = struct
   module O = struct
     type 'a t =
       { (* down to IPv4: datagram byte stream + the metadata IP needs *)
-        ip_start : 'a (* -> Ipv4_tx.start *)
+        ip_start : 'a (* -> Ipv4.Ipv4_tx.start *)
       ; l4_length : 'a [@bits 16] (* UDP total length = 8 + payload *)
       ; protocol : 'a [@bits 8] (* 17 = UDP *)
       ; m_tdata : 'a [@bits 8]

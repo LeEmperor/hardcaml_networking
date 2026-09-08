@@ -3,7 +3,7 @@
 `xilinx_reports.exe` uses
 [`hardcaml_xilinx_reports`](https://github.com/janestreet/hardcaml_xilinx_reports) to
 generate out-of-context Vivado projects and summarize timing and primitive utilization.
-It is separate from `lib/common/generate.exe`: the reports library emits its own Verilog,
+It is separate from `bin/generate.exe`: the reports library emits its own Verilog,
 clock XDC, Tcl, and report artifacts for each selected circuit.
 
 The available targets are:

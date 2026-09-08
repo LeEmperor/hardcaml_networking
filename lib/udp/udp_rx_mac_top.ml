@@ -6,7 +6,7 @@
    (L4) receive parsers on top of the MII Ethernet MAC (L2), so the wiring stays
    one-directional:
 
-   PHY ─→ Mac_top.m_axis ─(Eth payload)→ Ipv4_rx ─(UDP datagram)→ Udp_rx ─→ app
+   PHY ─→ Mii.Mac_top.m_axis ─(Eth payload)→ Ipv4_rx ─(UDP datagram)→ Udp_rx ─→ app
 
    Each layer only knows the one below it:
    - The MAC hands up the Ethernet *payload* byte stream (m_axis) plus two sidebands the
@@ -18,7 +18,7 @@
      [{src/dst port, lengths}].
 
    Backpressure flows the other way through two wire stubs that break the combinational
-   loops: Udp_rx.m_axis_tready → Ipv4_rx.l4_tready, and Ipv4_rx.m_axis_tready →
+   loops: Udp_rx.m_axis_tready → Ipv4.Ipv4_rx.l4_tready, and Ipv4.Ipv4_rx.m_axis_tready →
    MAC.m_axis_tready. The application's [app_tready] gates the whole chain from the top.
 
    This is a dedicated RX-only top: the MAC's TX AXI-S sink is tied off (no frames are
@@ -40,8 +40,6 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Mii_of_hardcaml
-open! Ipv4_of_hardcaml
 
 (* Bring-up RX policy: forward everything, just report status. The expected dst port
    mirrors [Udp_mac_top]'s TX dst_port (0x1235) so a loopback agrees. *)
@@ -119,11 +117,11 @@ let create ?(rx_fifo_for_sim = false) (scope : Scope.t) (i : _ I.t) : _ O.t =
   (* L2: Ethernet framing + FCS check. ethertype only matters for TX framing (tied off
      here); RX filtering keys off the latched rx_eth_type instead. *)
   let mac =
-    Mac_top.hierarchical
+    Mii.Mac_top.hierarchical
       ~rx_fifo_for_sim
       ~ethertype:0x0800
       scope
-      { Mac_top.I.rx_clock = i.rx_clock
+      { Mii.Mac_top.I.rx_clock = i.rx_clock
       ; rx_reset = i.rx_reset
       ; tx_clock = i.tx_clock
       ; tx_reset = i.tx_reset

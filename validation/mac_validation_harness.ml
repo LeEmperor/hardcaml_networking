@@ -36,8 +36,10 @@
 
 open! Core
 open! Hardcaml
-open! Mii_of_hardcaml (* Mac_top lives in the wrapped mii library *)
 open! Signal
+open! Hardcaml_networking
+open! Common
+open! Mii
 
 (*
  * One-shot TX trigger FSM (see the sequencer block in [create]):

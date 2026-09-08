@@ -1,21 +1,19 @@
 open! Core
 open! Hardcaml
-open! Mii_of_hardcaml
-open! Udp_of_hardcaml
-open! Uart_of_hardcaml
+open! Hardcaml_networking
 open! Signal
 
 (*
  * RTL generators, one subcommand per emittable artifact. Pick a target on the
  * command line instead of comment-toggling this file, e.g.:
  *
- *   dune exec lib/common/generate.exe -- mac
- *   dune exec lib/common/generate.exe -- udp
- *   dune exec lib/common/generate.exe -- udp-rx-64
- *   dune exec lib/common/generate.exe -- mac-validation
- *   dune exec lib/common/generate.exe -- udp-tx-validation
- *   dune exec lib/common/generate.exe -- udp-rx-validation
- *   dune exec lib/common/generate.exe -- udp-loopback-validation
+ *   dune exec bin/generate.exe -- mac
+ *   dune exec bin/generate.exe -- udp
+ *   dune exec bin/generate.exe -- udp-rx-64
+ *   dune exec bin/generate.exe -- mac-validation
+ *   dune exec bin/generate.exe -- udp-tx-validation
+ *   dune exec bin/generate.exe -- udp-rx-validation
+ *   dune exec bin/generate.exe -- udp-loopback-validation
  *
  * Targets:
  *   mac                    standalone Ethernet MAC        -> hardcaml_eth_mac.v
@@ -35,9 +33,11 @@ open! Signal
  * validation/generate_validation.exe (now folded in here).
  *)
 
-module Circ_mac = Circuit.With_interface (Mac_top.I) (Mac_top.O)
-module Circ_udp = Circuit.With_interface (Udp_mac_top.I) (Udp_mac_top.O)
-module Circ_udp_rx_64 = Circuit.With_interface (Udp_rx_64_mac_top.I) (Udp_rx_64_mac_top.O)
+module Circ_mac = Circuit.With_interface (Mii.Mac_top.I) (Mii.Mac_top.O)
+module Circ_udp = Circuit.With_interface (Udp.Udp_mac_top.I) (Udp.Udp_mac_top.O)
+
+module Circ_udp_rx_64 =
+  Circuit.With_interface (Udp.Udp_rx_64_mac_top.I) (Udp.Udp_rx_64_mac_top.O)
 
 module Circ_validation =
   Circuit.With_interface (Mac_validation_harness.I) (Mac_validation_harness.O)
@@ -86,7 +86,7 @@ let mac_cmd =
     emit
       ~scope
       ~path:"hardcaml_eth_mac.v"
-      (Circ_mac.create_exn ~name:"hardcaml_eth_mac" (Mac_top.create scope)))
+      (Circ_mac.create_exn ~name:"hardcaml_eth_mac" (Mii.Mac_top.create scope)))
 ;;
 
 let udp_cmd =
@@ -94,7 +94,7 @@ let udp_cmd =
     emit
       ~scope
       ~path:"hardcaml_udp_with_mac.v"
-      (Circ_udp.create_exn ~name:"Udp_stack_w_mac" (Udp_mac_top.create scope)))
+      (Circ_udp.create_exn ~name:"Udp_stack_w_mac" (Udp.Udp_mac_top.create scope)))
 ;;
 
 let udp_rx_64_cmd =
@@ -107,7 +107,7 @@ let udp_rx_64_cmd =
         ~path:"hardcaml_udp_rx_64_with_mac.v"
         (Circ_udp_rx_64.create_exn
            ~name:"udp_rx_64_mac_top"
-           (Udp_rx_64_mac_top.create scope)))
+           (Udp.Udp_rx_64_mac_top.create scope)))
 ;;
 
 let mac_validation_cmd =

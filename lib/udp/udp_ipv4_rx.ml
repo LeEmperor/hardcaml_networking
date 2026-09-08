@@ -7,10 +7,9 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Ipv4_of_hardcaml
 
-module Make (Ipv4_config : Ipv4_rx.Config) (Udp_config : Udp_rx.Config) = struct
-  module Ip = Ipv4_rx.Make (Ipv4_config)
+module Make (Ipv4_config : Ipv4.Ipv4_rx.Config) (Udp_config : Udp_rx.Config) = struct
+  module Ip = Ipv4.Ipv4_rx.Make (Ipv4_config)
   module Udp = Udp_rx.Make (Udp_config)
 
   module I = struct

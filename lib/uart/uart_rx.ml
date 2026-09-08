@@ -96,7 +96,9 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
   let rx_byte = i_regs.rx_byte in
   let d_out_valid = i_wires.d_out_valid in
   (* Falling edge on uart_rx_d signals the start bit. *)
-  let start_bit = Helper_circuits.falling_edge_detector rising_edge i.I.uart_rx_d in
+  let start_bit =
+    Common.Helper_circuits.falling_edge_detector rising_edge i.I.uart_rx_d
+  in
   Always.(
     compile
       [ (* default *)

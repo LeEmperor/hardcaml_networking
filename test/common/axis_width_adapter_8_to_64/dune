@@ -10,7 +10,7 @@
  (libraries
   core
   hardcaml
-  helper_circuits
+  hardcaml_networking
   hardcaml_step_testbench
   hardcaml_verif)
  (preprocess

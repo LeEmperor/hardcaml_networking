@@ -16,9 +16,10 @@
 
 open! Core
 open! Hardcaml
-open! Udp_of_hardcaml
 open! Helper_tb_functions
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Udp
 
 (* Inline tests are silent on success; the legacy executable retains the reviewable
    progress log and waveform mode. *)

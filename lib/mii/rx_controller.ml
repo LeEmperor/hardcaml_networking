@@ -14,7 +14,8 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Helper_circuits (* in theory things like increm_counter can be thrown in here? *)
+open! Common.Helper_circuits
+(* in theory things like increm_counter can be thrown in here? *)
 
 module I = struct
   type 'a t =

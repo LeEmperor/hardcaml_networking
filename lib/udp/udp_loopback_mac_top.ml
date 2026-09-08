@@ -12,13 +12,13 @@
  * re-wraps the recovered payload and echoes it back, so RX validation becomes
  * host-asserted (send -> echo -> assert) instead of eyeballing LEDs.
  *
- *     PHY RX ─→ Mac_top.m_axis ─→ Ipv4_rx ─→ Udp_rx ──┐  recovered app stream
+ *     PHY RX ─→ Mii.Mac_top.m_axis ─→ Ipv4_rx ─→ Udp_rx ──┐  recovered app stream
  *                  (one Mac_top)                        │  (app_tdata/tvalid/tlast
  *                                                       │   + app_start + payload_length)
  *                                                 RX->TX bridge FSM
  *                                                       │  (tx_start + payload_len
  *                                                       ▼   + payload_tdata/tvalid)
- *     PHY TX ←─ Mac_top.tx_* ←── Ipv4_tx ←── Udp_tx ◀──┘
+ *     PHY TX ←─ Mii.Mac_top.tx_* ←── Ipv4_tx ←── Udp_tx ◀──┘
  *
  * Everything (RX-parse, bridge, TX-build) runs in the tx_clock domain: the MAC
  * captures PHY RX in rx_clock, then its async RX FIFO presents [m_axis] in tx_clock,
@@ -44,8 +44,6 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Mii_of_hardcaml
-open! Ipv4_of_hardcaml
 
 (* ── TX endpoints (mirror Udp_mac_top; agree with udp_app.py golden constants) ── *)
 module Udp_cfg = struct
@@ -138,7 +136,7 @@ let create ?(rx_fifo_for_sim = false) (scope : Scope.t) (i : _ I.t) : _ O.t =
   (* ── Wire stubs breaking every combinational loop ─────────────────────────── *)
   (* TX-stack backpressure (mirrors Udp_mac_top) *)
   let wire_mac_tready = Signal.wire 1 in
-  (* MAC.s_axis_tready -> Ipv4_tx.mac_tready *)
+  (* MAC.s_axis_tready -> Ipv4.Ipv4_tx.mac_tready *)
   (* RX-stack backpressure (mirrors Udp_rx_mac_top) *)
   let wire_mac_rready = Signal.wire 1 in
   (* RX->TX bridge FORWARD path (Udp_rx outputs -> Udp_tx inputs, via the FSM) *)
@@ -168,11 +166,11 @@ let create ?(rx_fifo_for_sim = false) (scope : Scope.t) (i : _ I.t) : _ O.t =
   in
   (* ── L2: ONE shared MAC, both directions wired ───────────────────────────── *)
   let mac =
-    Mac_top.hierarchical
+    Mii.Mac_top.hierarchical
       ~rx_fifo_for_sim
       ~ethertype:0x0800
       scope
-      { Mac_top.I.rx_clock = i.rx_clock
+      { Mii.Mac_top.I.rx_clock = i.rx_clock
       ; rx_reset = i.rx_reset
       ; tx_clock = i.tx_clock
       ; tx_reset = i.tx_reset

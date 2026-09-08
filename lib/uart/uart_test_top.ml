@@ -19,8 +19,8 @@
 open! Core
 open! Hardcaml
 open! Signal
-module I = Arty_board_top.I
-module O = Arty_board_top.O
+module I = Common.Arty_board_top.I
+module O = Common.Arty_board_top.O
 
 let create scope i : _ O.t =
   (* port aliases *)
@@ -28,10 +28,15 @@ let create scope i : _ O.t =
   let rst = Signal.bit i.I.btn ~pos:0 in
   let en = Signal.bit i.I.sw ~pos:0 in
   (* hierarchical instantiations *)
-  let heartbeat_inst = Second_pulse.create scope { Second_pulse.I.clk = clock100; rst } in
+  let heartbeat_inst =
+    Common.Second_pulse.create scope { Common.Second_pulse.I.clk = clock100; rst }
+  in
   (* 100e6 / 868 ~= 115.2 kBd *)
   let baud_inst =
-    Second_pulse.create scope ~clk_freq:868 { Second_pulse.I.clk = clock100; rst }
+    Common.Second_pulse.create
+      scope
+      ~clk_freq:868
+      { Common.Second_pulse.I.clk = clock100; rst }
   in
   let uart_inst =
     Uart_tx.create

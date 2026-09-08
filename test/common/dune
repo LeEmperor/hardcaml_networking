@@ -2,7 +2,7 @@
 ; Author: Bohdan Purtell
 ;
 ; Dune specs for the shared testbench helpers. The per-DUT suites live in subdirectories
-; (clk_div/, second_pulse/, helper_circuits/, verif/), each with its own dune.
+; (clk_div/, second_pulse/, hardcaml_networking/, verif/), each with its own dune.
 
 (library
  (name helper_tb_functions)

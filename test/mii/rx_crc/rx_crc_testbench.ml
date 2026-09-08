@@ -26,9 +26,10 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Mii_of_hardcaml
 open! Hardcaml_step_testbench
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Mii
 module Dut = Rx_crc
 
 module Output_snapshot = struct

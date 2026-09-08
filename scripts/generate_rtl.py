@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate every Hardcaml RTL target and write a provenance manifest.
 
-Runs each subcommand of lib/common/generate.exe through scripts/with-switch.sh,
+Runs each subcommand of bin/generate.exe through scripts/with-switch.sh,
 verifies the output was actually refreshed by this run, and records what
 produced it in MANIFEST.txt.
 
@@ -34,7 +34,7 @@ import subprocess
 import sys
 
 # Subcommand -> output path, relative to the repo root. Mirrors the Command.group
-# at the bottom of lib/common/generate.ml; keep the two in step.
+# at the bottom of bin/generate.ml; keep the two in step.
 TARGETS = [
     ("mac", "hardcaml_eth_mac.v"),
     ("udp", "hardcaml_udp_with_mac.v"),
@@ -56,7 +56,7 @@ OPAM_PACKAGES = [
     "core",
 ]
 
-GENERATOR = "lib/common/generate.exe"
+GENERATOR = "bin/generate.exe"
 WITH_SWITCH = "scripts/with-switch.sh"
 
 # Tolerance for the mtime freshness check, in seconds. Absorbs coarse filesystem

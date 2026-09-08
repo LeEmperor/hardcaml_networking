@@ -5,8 +5,9 @@
 
 open! Core
 open! Hardcaml
-open! Mii_of_hardcaml
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Mii
 module Dut = Mac_top
 module Sim = Cyclesim.With_interface (Dut.I) (Dut.O)
 

@@ -16,7 +16,8 @@
 
 open! Core
 open! Hardcaml
-open! Mii_of_hardcaml
+open! Hardcaml_networking
+open! Mii
 
 let () = print_endline "=== Running MAC RX Datapath Testbench ==="
 

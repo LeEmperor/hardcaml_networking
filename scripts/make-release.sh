@@ -8,7 +8,7 @@ set -euo pipefail
 # Regenerates the RTL and its manifest, stages three bundles, writes and verifies
 # per-bundle checksums, and zips the result. Run --help for the full flag list.
 #
-# Everything staged is a COPY. lib/common/generate.ml writes each target to a
+# Everything staged is a COPY. bin/generate.ml writes each target to a
 # fixed repo-relative path that Vivado and the top-level README depend on, so the
 # originals stay where they are generated.
 #

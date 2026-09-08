@@ -34,7 +34,7 @@
   (ppx_expect :with-test)
   (base_quickcheck :with-test)
   (alcotest :with-test)
-  ; Repo tooling: synthesis/ reports and lib/common/generate.exe. Never
+  ; Repo tooling: synthesis/ reports and bin/generate.exe. Never
   ; installed, but needed for a root `dune build`, so they ride with-test
   ; rather than being dropped.
   (hardcaml_xilinx_reports :with-test)

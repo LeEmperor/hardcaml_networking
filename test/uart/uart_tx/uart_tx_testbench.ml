@@ -31,9 +31,10 @@
 
 open! Core
 open! Hardcaml
-open! Uart_of_hardcaml
 open! Hardcaml_step_testbench
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Uart
 module Dut = Uart_tx
 
 (* Start bit, eight data bits, stop bit. *)

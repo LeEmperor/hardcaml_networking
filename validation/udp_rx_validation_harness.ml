@@ -45,8 +45,10 @@
 
 open! Core
 open! Hardcaml
-open! Udp_of_hardcaml (* Udp_rx_mac_top *)
 open! Signal
+open! Hardcaml_networking
+open! Common
+open! Udp
 
 (* Reuse the canonical board pin contract as the harness port interface. *)
 module I = Arty_board_top.I

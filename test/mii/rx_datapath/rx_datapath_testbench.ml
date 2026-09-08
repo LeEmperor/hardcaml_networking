@@ -35,9 +35,10 @@
 open! Core
 open! Hardcaml
 open! Signal
-open! Mii_of_hardcaml
 open! Hardcaml_step_testbench
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Mii
 module Dut = Rx_datapath
 
 (* [keep] is the module's synthesis anti-pruning OR-reduce and carries no verification

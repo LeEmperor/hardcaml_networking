@@ -21,9 +21,10 @@
 
 open! Core
 open! Hardcaml
-open! Udp_of_hardcaml
 open! Helper_tb_functions
 open! Hardcaml_verif
+open! Hardcaml_networking
+open! Udp
 
 (* Inline tests are silent on success; the legacy executable retains its progress log. *)
 let printf format = Printf.ifprintf Out_channel.stdout format
