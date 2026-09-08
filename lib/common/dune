@@ -22,6 +22,7 @@
 
 (library
  (name helper_circuits)
+ (public_name hardcaml_networking.common)
  (wrapped false)
  (libraries core hardcaml hardcaml_circuits)
  (modules
