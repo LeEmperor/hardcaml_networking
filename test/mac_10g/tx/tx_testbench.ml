@@ -295,6 +295,12 @@ let termination_lanes snapshots =
     |> Option.map ~f:fst)
 ;;
 
+let start_lanes snapshots =
+  List.filter_map snapshots ~f:(fun ({ Snapshot.lanes; control; _ } : Snapshot.t) ->
+    List.findi lanes ~f:(fun lane value -> control land (1 lsl lane) <> 0 && value = 0xfb)
+    |> Option.map ~f:fst)
+;;
+
 let interframe_idle_counts snapshots =
   let counts = ref [] in
   let after_terminate = ref false in
@@ -313,6 +319,24 @@ let interframe_idle_counts snapshots =
         counts := !idle_count :: !counts;
         after_terminate := false)));
   List.rev !counts
+;;
+
+let check_dic_gaps gaps =
+  let cumulative_idle = ref 0 in
+  List.iteri gaps ~f:(fun index gap ->
+    (* A source/buffer bubble may lengthen the gap by whole idle words. DIC only
+       constrains the minimum gap and accumulated shortfall. *)
+    if gap < 9 then failwithf "illegal DIC gap %d after frame %d" gap index ();
+    cumulative_idle := !cumulative_idle + gap;
+    let gap_count = index + 1 in
+    if !cumulative_idle < (12 * gap_count) - 3
+    then
+      failwithf
+        "DIC deficit exceeded three bytes after frame %d: %d idles across %d gaps"
+        index
+        !cumulative_idle
+        gap_count
+        ())
 ;;
 
 let expected_wire_frame bytes =

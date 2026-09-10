@@ -17,13 +17,58 @@ let%test_unit "all final keep widths, padding boundary, and termination lanes de
   [%test_result: int list]
     (termination_lanes observations |> List.dedup_and_sort ~compare:Int.compare)
     ~expect:(List.range 0 8);
-  assert (List.for_all (interframe_idle_counts observations) ~f:(fun count -> count >= 12));
+  let gaps = interframe_idle_counts observations in
+  check_dic_gaps gaps;
+  [%test_result: int] (List.length gaps) ~expect:(List.length frames - 1);
+  [%test_result: int list]
+    (start_lanes observations |> List.dedup_and_sort ~compare:Int.compare)
+    ~expect:[ 0; 4 ];
   let final = List.last_exn observations in
   [%test_result: int] final.frames ~expect:(List.length frames);
   [%test_result: int]
     final.bytes
     ~expect:
       (List.sum (module Int) frames ~f:(fun frame -> Int.max 60 (List.length frame) + 4));
+  [%test_result: int] final.underflows ~expect:0
+;;
+
+let%test_unit "long random frame sequences preserve bytes, CRC, and DIC schedule" =
+  let frame_generator = Generators.byte_list ~min_length:14 ~max_length:251 () in
+  let sequence_generator = Quickcheck.Generator.list_with_length 24 frame_generator in
+  Quickcheck.test
+    ~trials:20
+    ~seed:(`Deterministic "mac-10g-line-rate-sequences")
+    ~sexp_of:[%sexp_of: int list list]
+    sequence_generator
+    ~f:(fun frames ->
+      let observations = frames |> List.concat_map ~f:Beat.of_frame |> Testbench.run in
+      [%test_result: int list list]
+        (decode_frames observations)
+        ~expect:(List.map frames ~f:expected_wire_frame);
+      check_dic_gaps (interframe_idle_counts observations);
+      [%test_result: int list]
+        (start_lanes observations |> List.dedup_and_sort ~compare:Int.compare)
+        ~expect:[ 0; 4 ];
+      let final = List.last_exn observations in
+      [%test_result: int] final.frames ~expect:(List.length frames);
+      [%test_result: int] final.underflows ~expect:0)
+;;
+
+let%test_unit "back-to-back minimum frames use the line-rate DIC schedule" =
+  let frames = List.init 128 ~f:(fun index -> bytes (14 + (index land 1))) in
+  let observations = frames |> List.concat_map ~f:Beat.of_frame |> Testbench.run in
+  [%test_result: int list list]
+    (decode_frames observations)
+    ~expect:(List.map frames ~f:expected_wire_frame);
+  let gaps = interframe_idle_counts observations in
+  check_dic_gaps gaps;
+  [%test_result: int] (List.length gaps) ~expect:(List.length frames - 1);
+  assert (List.for_all gaps ~f:(fun gap -> gap <= 15));
+  [%test_result: int list]
+    (start_lanes observations |> List.dedup_and_sort ~compare:Int.compare)
+    ~expect:[ 0; 4 ];
+  let final = List.last_exn observations in
+  [%test_result: int] final.frames ~expect:(List.length frames);
   [%test_result: int] final.underflows ~expect:0
 ;;
 

@@ -25,7 +25,33 @@ let%expect_test "short-frame TX phase trace" =
     (9 2 0 0 0)
     (10 2 0 0 0)
     (11 3 255 0 0)
-    (12 4 255 1 64)
-    (13 4 255 1 64)
+    |}]
+;;
+
+let%expect_test "DIC alternates legal start alignments" =
+  let frames = List.init 6 ~f:(fun index -> List.init 14 ~f:(fun byte -> index + byte)) in
+  Testbench.run (List.concat_map frames ~f:Beat.of_frame)
+  |> List.iteri ~f:(fun cycle ({ Snapshot.lanes; control; _ } : Snapshot.t) ->
+    List.iteri lanes ~f:(fun lane value ->
+      if control land (1 lsl lane) <> 0 && (value = 0xfb || value = 0xfd)
+      then
+        print_s
+          [%sexp
+            ((cycle, (if value = 0xfb then "start" else "terminate"), lane)
+             : int * string * int)]));
+  [%expect
+    {|
+    (2 start 0)
+    (11 terminate 0)
+    (12 start 4)
+    (21 terminate 4)
+    (23 start 0)
+    (32 terminate 0)
+    (33 start 4)
+    (42 terminate 4)
+    (44 start 4)
+    (53 terminate 4)
+    (55 start 0)
+    (64 terminate 0)
     |}]
 ;;
