@@ -250,7 +250,6 @@ module Make (Config : Config) = struct
     (* handshake *)
     let read_accepted = read_valid &: i.read_ready_i in
 
-    (**)
     let accepted_read_count =
       mux2
         (* is the read accepted? *)
