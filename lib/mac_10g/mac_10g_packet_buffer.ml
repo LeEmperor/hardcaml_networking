@@ -15,7 +15,7 @@ open! Hardcaml
 open! Signal
 
 module type Config = sig
-  val depth_bytes : int (* *)
+  val depth_bytes : int (* lmao *)
   val descriptor_capacity : int (* how many entries the descriptor FIFO holds *)
   val error_width : int
 end
@@ -526,9 +526,13 @@ module Make (Config : Config) = struct
 
     (* for counters *)
     let next_bytes_used =
-      bytes_used.value +: accepted_count_ext -: read_count_ext -: rollback_count
+      bytes_used.value +:
+      accepted_count_ext -:
+      read_count_ext -:
+      rollback_count
     in
 
+    (* register assignments for the speculative vs rollback system; pretty trivial *)
     Always.(
       compile
         [ speculative_pointer
