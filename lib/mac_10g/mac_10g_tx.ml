@@ -1,8 +1,8 @@
 (* University of Florida *)
 (* Author: Bohdan Purtell *)
 (* Module: "mac_10g_tx.ml" *)
-(* Functional lane-0 10G XGMII transmitter with padding, FCS, termination, and a
-   conservative interpacket gap.
+(* 10G XGMII transmitter with padding, FCS, lane-0/lane-4 starts, termination, and deficit
+   idle count scheduling.
 *)
 
 open! Core
@@ -46,6 +46,7 @@ let state_body = 1
 let state_pad = 2
 let state_fcs = 3
 let state_ifg = 4
+let state_shift_tail = 5
 
 (* and to think some poor soul would do this in SystemVerilog; it's me; I'm the poor soul *)
 let byte data lane = select data ~high:((8 * lane) + 7) ~low:(8 * lane)
@@ -222,6 +223,7 @@ let fcs_word ~fcs ~index =
   }
 ;;
 
+(* vestigial *)
 module I_Regs = struct
   type 'a t = { bruh : 'a } [@@deriving hardcaml]
 end
@@ -231,6 +233,7 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
   (* spec *)
   let spec = Reg_spec.create ~clock:i.clock_i ~clear:i.reset_i () in
 
+  (* scoper naming *)
   let ( -- ) = Scope.naming scope in
 
   (* fun helper -> makes an Always Reg out of something -> I think my I_Regs approach is better *)
@@ -238,18 +241,25 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
   let reg_var width = Always.Variable.reg ~enable:vdd ~width spec in
 
   (* new approach to doing state; may move back to a module States declaration *)
+  (* update: will go back to module State defines for ease of debugabiliy *)
   let state = reg_var 3 in
 
-  let crc = reg_var 32 in
-  let covered_count = reg_var 17 in
-  let stored_fcs = reg_var 32 in
-  let fcs_index = reg_var 3 in
-  let pending_frame_length = reg_var 17 in
-  let ifg_words = reg_var 2 in
-  let frames = reg_var 64 in
-  let bytes = reg_var 64 in
-  let underflows = reg_var 64 in
-  let underflow_sticky = reg_var 1 in
+  let crc                   = reg_var 32 in
+  let covered_count         = reg_var 17 in
+  let stored_fcs            = reg_var 32 in
+  let fcs_index             = reg_var 3 in
+  let pending_frame_length  = reg_var 17 in
+  let ifg_words             = reg_var 2 in
+  let deficit_idle_count    = reg_var 2 in
+  let start_lane4           = reg_var 1 in
+  let shift_first           = reg_var 1 in
+  let shift_carry           = reg_var 32 in
+  let shift_tail_data       = reg_var 32 in
+  let shift_tail_count      = reg_var 4 in
+  let frames                = reg_var 64 in
+  let bytes                 = reg_var 64 in
+  let underflows            = reg_var 64 in
+  let underflow_sticky      = reg_var 1 in
 
   (* one day i will write a ppx that does this for me *)
   let is_wait = state.value ==:. state_wait in
@@ -257,9 +267,10 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
   let is_pad  = state.value ==:. state_pad in
   let is_fcs  = state.value ==:. state_fcs in
   let is_ifg  = state.value ==:. state_ifg in
+  let is_shift_tail = state.value ==:. state_shift_tail in
 
   (* thank God I wrote those helper functions *)
-  let start_word =
+  let start_word_lane0 =
     Xgmii.of_lane_bytes (* build us a word map out of ints *)
       ([ Xgmii.Control_character.start ] @  (* /S *)
        List.init 6 ~f:(Fn.const 0x55) @     (* 0x55 *)
@@ -267,6 +278,22 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
       )
       ~control:0x01 (* /S is a control char - use a 0x55, but that as txc[where[/S]] means /S in XGMII *)
   in
+
+  let start_word_lane4 =
+    Xgmii.of_lane_bytes
+      (List.init 4 ~f:(Fn.const Xgmii.Control_character.idle)
+       @ [ Xgmii.Control_character.start ]
+       @ List.init 3 ~f:(Fn.const 0x55))
+      ~control:0x1f
+  in
+
+  let start_word =
+    { Xgmii.Word.data = mux2 start_lane4.value start_word_lane4.data start_word_lane0.data
+    ; control = mux2 start_lane4.value start_word_lane4.control start_word_lane0.control
+    }
+  in
+
+  let lane4_preamble_finish = of_int_trunc ~width:32 0xd5555555 in
 
   (* combo assignment on the body data and whether or not the keep lane corresponds with it;
     one may consider moving this to a common function library?
@@ -505,6 +532,85 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
       ~index:fcs_index.value
   in
 
+  (* A lane-4 start leaves four preamble bytes at the beginning of the first body
+     cycle.  Thereafter those lanes carry the upper half of the previously accepted
+     buffer beat while the lower half of the current beat occupies lanes 4..7. *)
+  let shifted_low_prefix =
+    mux2 shift_first.value lane4_preamble_finish shift_carry.value
+  in
+  let shifted_body_data =
+    concat_lsb [ shifted_low_prefix; select masked_body_data ~high:31 ~low:0 ]
+  in
+  let body_payload_mask = Mac_10g_axis.keep_of_byte_count body_count in
+  let body_payload_crc =
+    Mac_10g_crc32.update crc.value ~data:masked_body_data ~valid_bytes:body_payload_mask
+  in
+  let shifted_body_fits_low_half = body_count <=:. 4 in
+  let shifted_body_space = of_int_trunc ~width:4 4 -: body_count in
+  let shifted_pad_count =
+    mux2
+      (pad_needed <=: uresize shifted_body_space ~width:17)
+      (select pad_needed ~high:3 ~low:0)
+      shifted_body_space
+  in
+  let shifted_padding_complete =
+    pad_needed <=: uresize shifted_body_space ~width:17
+  in
+  let shifted_crc_count = body_count +: shifted_pad_count in
+  let shifted_crc_mask = Mac_10g_axis.keep_of_byte_count shifted_crc_count in
+  let shifted_next_crc =
+    Mac_10g_crc32.update
+      crc.value
+      ~data:masked_body_data
+      ~valid_bytes:shifted_crc_mask
+  in
+  let shifted_prefix_count = of_int_trunc ~width:4 4 +: body_count +: shifted_pad_count in
+  let shifted_final_fcs = Mac_10g_crc32.fcs shifted_next_crc in
+  let shifted_terminal_word, shifted_term_fits =
+    terminal_word
+      ~prefix_data:shifted_body_data
+      ~prefix_count:shifted_prefix_count
+      ~fcs:shifted_final_fcs
+  in
+
+  (* When the final buffer beat has more than four bytes, its upper half is emitted
+     in a separate tail cycle.  Its payload bytes have already participated in the
+     CRC; this cycle only advances the CRC for padding that follows them. *)
+  let shift_tail_pad_needed =
+    mux2
+      (covered_count.value <:. 60)
+      (of_int_trunc ~width:17 60 -: covered_count.value)
+      (zero 17)
+  in
+  let shift_tail_space = of_int_trunc ~width:4 8 -: shift_tail_count.value in
+  let shift_tail_pad_count =
+    mux2
+      (shift_tail_pad_needed <=: uresize shift_tail_space ~width:17)
+      (select shift_tail_pad_needed ~high:3 ~low:0)
+      shift_tail_space
+  in
+  let shift_tail_padding_complete =
+    shift_tail_pad_needed <=: uresize shift_tail_space ~width:17
+  in
+  let shift_tail_pad_mask = Mac_10g_axis.keep_of_byte_count shift_tail_pad_count in
+  let shift_tail_next_crc =
+    Mac_10g_crc32.update
+      crc.value
+      ~data:(zero 64)
+      ~valid_bytes:shift_tail_pad_mask
+  in
+  let shift_tail_prefix_count = shift_tail_count.value +: shift_tail_pad_count in
+  let shift_tail_final_fcs = Mac_10g_crc32.fcs shift_tail_next_crc in
+  let shift_tail_terminal_word, shift_tail_term_fits =
+    terminal_word
+      ~prefix_data:(uresize shift_tail_data.value ~width:64)
+      ~prefix_count:shift_tail_prefix_count
+      ~fcs:shift_tail_final_fcs
+  in
+  let shift_tail_completed_length =
+    covered_count.value +: shift_tail_pad_needed +:. 4
+  in
+
   (* underflow protector *)
   let body_underflow = (i.enable_i &:
                         is_body &:
@@ -513,6 +619,34 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
 
   let frame_pulse = Always.Variable.wire ~default:gnd () in
   let frame_length_pulse = Always.Variable.wire ~default:(zero 17) () in
+  let frame_term_lane = Always.Variable.wire ~default:(zero 3) () in
+
+  (* DIC keeps the accumulated shortfall from the nominal twelve idle bytes in
+     the range 0..3.
+
+     For each terminate lane there are two legal next starts,
+     four bytes apart.  Use the earlier one only if its shortfall still fits
+  *)
+  let term_lane_phase = select frame_term_lane.value ~high:1 ~low:0 in
+  let shortfall = uresize term_lane_phase ~width:3 +:. 1 in
+  let can_use_short_gap =
+    uresize deficit_idle_count.value ~width:3 +: shortfall <=:. 3
+  in
+  let short_start_lane4 = ~:(bit frame_term_lane.value ~pos:2) in
+  let scheduled_start_lane4 =
+    mux2 can_use_short_gap short_start_lane4 ~:short_start_lane4
+  in
+
+  let scheduled_deficit =
+    mux2
+      can_use_short_gap
+      (uresize deficit_idle_count.value ~width:3 +: shortfall)
+      (uresize deficit_idle_count.value ~width:3
+       -: (of_int_trunc ~width:3 4 -: shortfall))
+  in
+  let scheduled_idle_word =
+    mux2 can_use_short_gap (bit frame_term_lane.value ~pos:2) vdd
+  in
 
   (* outputs an XGMII Word.t *)
   let (output_word : t Xgmii.Word.t) =
@@ -570,6 +704,26 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
         Xgmii.error_word.control
     in
 
+    let shifted_word_data =
+      mux2
+        i.buffer_valid_i
+        (mux2
+           (i.buffer_last_i &: shifted_body_fits_low_half &: shifted_padding_complete)
+           shifted_terminal_word.data
+           shifted_body_data)
+        Xgmii.error_word.data
+    in
+
+    let shifted_word_control =
+      mux2
+        i.buffer_valid_i
+        (mux2
+           (i.buffer_last_i &: shifted_body_fits_low_half &: shifted_padding_complete)
+           shifted_terminal_word.control
+           (zero 8))
+        Xgmii.error_word.control
+    in
+
     let wait_start =
       i.enable_i &:
       i.buffer_valid_i
@@ -585,11 +739,14 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
                 start_word.data
                 Xgmii.idle_word.data
 
-            ; body_word
+            ; mux2 start_lane4.value shifted_word_data body_word
             ; mux2 (pad_remaining <=:. 8) pad_terminal_word.data (zero 64)
             ; stored_fcs_word.data
             ; Xgmii.idle_word.data (* fill remaining data *)
-            ; Xgmii.idle_word.data
+            ; mux2
+                shift_tail_padding_complete
+                shift_tail_terminal_word.data
+                (uresize shift_tail_data.value ~width:64)
             ; Xgmii.idle_word.data
             ; Xgmii.idle_word.data
             ]
@@ -597,11 +754,11 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
             mux
             state.value
             [ mux2 wait_start start_word.control Xgmii.idle_word.control
-            ; body_control
+            ; mux2 start_lane4.value shifted_word_control body_control
             ; mux2 (pad_remaining <=:. 8) pad_terminal_word.control (zero 8)
             ; stored_fcs_word.control
             ; Xgmii.idle_word.control (* fill remaining control *)
-            ; Xgmii.idle_word.control
+            ; mux2 shift_tail_padding_complete shift_tail_terminal_word.control (zero 8)
             ; Xgmii.idle_word.control
             ; Xgmii.idle_word.control
             ]
@@ -622,45 +779,110 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
         ; crc             <-- Mac_10g_crc32.initial
         ; covered_count   <--. 0
         ; ifg_words       <--. 0
+        ; deficit_idle_count <--. 0
+        ; start_lane4     <--. 0
+        ; shift_first     <--. 0
         ]
           [ when_ (* initial word blast from buffer; this is the transition definition from wait to actual payload *)
               (is_wait &: i.buffer_valid_i)
               [ state <--. state_body
               ; crc <-- Mac_10g_crc32.initial
               ; covered_count <--. 0
+              ; shift_first <-- start_lane4.value
               ]
           ; when_
               is_body
               [ if_ ~:(i.buffer_valid_i) (* if the next buffer beat is invalid, *)
                   [ state <--. state_ifg; ifg_words <--. 2 ] (* IFG time *)
-                  [ crc <-- body_next_crc (* else, declare CRCs, and set next covered_count reg *)
-                  ; covered_count
-                    <-- covered_count.value +: uresize body_crc_count ~width:17
-                  ; when_ (* if this is the last beat from the buffer for that "packet" *)
-                      i.buffer_last_i
-                      [ if_
-                          ~:body_padding_complete (* spare padding state transition *)
-                          [ state <--. state_pad ]
-                          [ if_ (* the body padding is complete, does it fit? *)
-
-                              (* yes *)
-                              body_term_fits
-                              [ state <--. state_ifg
-                              ; ifg_words <--. 2
-                              ; frame_pulse <-- vdd
-                              ; frame_length_pulse <-- body_completed_length
+                  [ if_
+                      start_lane4.value
+                      [ crc <-- body_payload_crc
+                      ; covered_count
+                        <-- covered_count.value +: uresize body_count ~width:17
+                      ; shift_carry <-- select masked_body_data ~high:63 ~low:32
+                      ; shift_first <--. 0
+                      ; when_
+                          i.buffer_last_i
+                          [ if_
+                              ~:shifted_body_fits_low_half
+                              [ state <--. state_shift_tail
+                              ; shift_tail_data <-- select masked_body_data ~high:63 ~low:32
+                              ; shift_tail_count
+                                <-- body_count -:. 4
                               ]
-
-                              (* no *)
-                              [ state <--. state_fcs
-                              ; stored_fcs <-- body_final_fcs
-                              ; fcs_index
-                                <-- uresize
-                                      (of_int_trunc ~width:4 8 -: body_prefix_count)
-                                      ~width:3
-                              ; pending_frame_length <-- body_completed_length
+                              [ crc <-- shifted_next_crc
+                              ; covered_count
+                                <-- count_after_body
+                                    +: uresize shifted_pad_count ~width:17
+                              ; if_
+                                  ~:shifted_padding_complete
+                                  [ state <--. state_pad ]
+                                  [ state <--. state_fcs
+                                  ; stored_fcs <-- shifted_final_fcs
+                                  ; fcs_index
+                                    <-- uresize
+                                          (of_int_trunc ~width:4 8
+                                           -: shifted_prefix_count)
+                                          ~width:3
+                                  ; pending_frame_length <-- body_completed_length
+                                  ]
                               ]
                           ]
+                      ]
+                      [ crc <-- body_next_crc (* else, declare CRCs, and set next covered_count reg *)
+                      ; covered_count
+                        <-- covered_count.value +: uresize body_crc_count ~width:17
+                      ; when_ (* if this is the last beat from the buffer for that "packet" *)
+                          i.buffer_last_i
+                          [ if_
+                              ~:body_padding_complete (* spare padding state transition *)
+                              [ state <--. state_pad ]
+                              [ if_ (* the body padding is complete, does it fit? *)
+
+                                  (* yes *)
+                                  body_term_fits
+                                  [ frame_pulse <-- vdd
+                                  ; frame_length_pulse <-- body_completed_length
+                                  ; frame_term_lane
+                                    <-- uresize (body_prefix_count +:. 4) ~width:3
+                                  ]
+
+                                  (* no *)
+                                  [ state <--. state_fcs
+                                  ; stored_fcs <-- body_final_fcs
+                                  ; fcs_index
+                                    <-- uresize
+                                          (of_int_trunc ~width:4 8 -: body_prefix_count)
+                                          ~width:3
+                                  ; pending_frame_length <-- body_completed_length
+                                  ]
+                              ]
+                          ]
+                      ]
+                  ]
+              ]
+          ; when_
+              is_shift_tail
+              [ crc <-- shift_tail_next_crc
+              ; covered_count
+                <-- covered_count.value +: uresize shift_tail_pad_count ~width:17
+              ; if_
+                  ~:shift_tail_padding_complete
+                  [ state <--. state_pad ]
+                  [ if_
+                      shift_tail_term_fits
+                      [ frame_pulse <-- vdd
+                      ; frame_length_pulse <-- shift_tail_completed_length
+                      ; frame_term_lane
+                        <-- uresize (shift_tail_prefix_count +:. 4) ~width:3
+                      ]
+                      [ state <--. state_fcs
+                      ; stored_fcs <-- shift_tail_final_fcs
+                      ; fcs_index
+                        <-- uresize
+                              (of_int_trunc ~width:4 8 -: shift_tail_prefix_count)
+                              ~width:3
+                      ; pending_frame_length <-- shift_tail_completed_length
                       ]
                   ]
               ]
@@ -674,10 +896,9 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
                   (pad_remaining <=:. 8) (* pad remaining can possibly fit in the final word *)
                   [ if_
                       pad_term_fits (* does the pad term fit in the final word beat? *)
-                      [ state <--. state_ifg (* yes - goto end *)
-                      ; ifg_words <--. 2
-                      ; frame_pulse <-- vdd
+                      [ frame_pulse <-- vdd
                       ; frame_length_pulse <--. 64
+                      ; frame_term_lane <-- uresize (pad_count +:. 4) ~width:3
                       ]
 
                       [ state <--. state_fcs (* no - goto FCS *)
@@ -694,10 +915,12 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
               ]
           ; when_
               is_fcs (* fcs state *)
-              [ state <--. state_ifg (* finish out *)
-              ; ifg_words <--. 2
-              ; frame_pulse <-- vdd (* frame_pulse not just yet *)
+              [ frame_pulse <-- vdd (* frame_pulse not just yet *)
               ; frame_length_pulse <-- pending_frame_length.value (* we're almost there *)
+              ; frame_term_lane
+                <-- uresize
+                      (of_int_trunc ~width:4 4 -: uresize fcs_index.value ~width:4)
+                      ~width:3
               ]
           ; when_
               is_ifg (* interframe-gap state *)
@@ -705,6 +928,15 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
                   (ifg_words.value <=:. 1) (* *)
                   [ state <--. state_wait; ifg_words <--. 0 ]
                   [ ifg_words <-- ifg_words.value -:. 1 ]
+              ]
+          ; when_
+              frame_pulse.value
+              [ start_lane4 <-- scheduled_start_lane4
+              ; deficit_idle_count <-- sel_bottom scheduled_deficit ~width:2
+              ; if_
+                  scheduled_idle_word
+                  [ state <--. state_ifg; ifg_words <--. 1 ]
+                  [ state <--. state_wait; ifg_words <--. 0 ]
               ]
           ]
       ; if_
