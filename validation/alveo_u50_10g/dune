@@ -1,0 +1,25 @@
+; Alveo U50 10G MAC validation harnesses. Board-level bring-up scaffolding, kept
+; OUTSIDE lib/ for the same reason validation/dune is: lib/ holds the reusable MAC,
+; this holds the throwaway silicon scaffolding that drives it.
+;
+; Unlike the Arty harnesses this library does NOT depend on helper_circuits: there is
+; no Arty_board_top pin contract to reuse, because the Hardcaml design is not the top
+; level here -- it sits inside u50_10g_top.sv next to the AMD PCS/GT IP.
+;
+; RTL is emitted by the unified generator:
+;   dune exec lib/common/generate.exe -- u50-10g-tx-validation
+;
+;  This file was heavily edited by AI, as I find no use in wasting away at writing
+;  validation harnesses myself. If you have problems with this, bite me.
+
+(library
+ (name u50_validation)
+ (wrapped false)
+ (libraries core hardcaml mac_10g_of_hardcaml)
+ (modules u50_scaffolding u50_frame_source u50_mac_tx_harness)
+ (flags
+  (:standard -w -27-57-33-34-35-40-63-47-26))
+ (preprocess
+  (pps ppx_hardcaml ppx_jane))
+ (lint
+  (pps ppx_js_style)))
