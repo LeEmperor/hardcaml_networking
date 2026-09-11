@@ -49,6 +49,18 @@ let keep_byte_count (keep : t) =
     ~f:(fun count enabled -> count +: uresize enabled ~width:4)
 ;;
 
+(* Decode the nine possible low-lane prefix masks, including zero. This is the inverse of
+   a thermometer encoding: each binary count bit is the XOR of the prefix bits at that
+   bit's transition positions. Use only after keep validation or for packet-buffer read
+   masks; arbitrary masks still need [keep_byte_count]. *)
+let byte_count_of_contiguous_keep keep =
+  let parity positions =
+    List.map positions ~f:(fun pos -> bit keep ~pos) |> reduce ~f:( ^: )
+  in
+  concat_lsb
+    [ parity (List.range 0 8); parity [ 1; 3; 5; 7 ]; parity [ 3; 7 ]; bit keep ~pos:7 ]
+;;
+
 [@@@ocamlformat "disable"]
 let keep_of_byte_count (byte_count : t) =
   mux
