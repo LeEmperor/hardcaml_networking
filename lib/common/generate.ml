@@ -86,6 +86,19 @@ let mac_cmd =
       (Circ_mac.create_exn ~name:"hardcaml_eth_mac" (Mac_top.create scope)))
 ;;
 
+let mac_10g_cmd ~flatten =
+  Command.basic
+    ~summary:"full-duplex 10G XGMII MAC"
+    (Command.Param.return (fun () ->
+       let module M = Mac_10g_of_hardcaml.Mac_10g_top in
+       let module C = Circuit.With_interface (M.I) (M.O) in
+       let scope = Scope.create ~flatten_design:flatten () in
+       emit
+         ~scope
+         ~path:(if flatten then "hardcaml_mac_10g_flat.v" else "hardcaml_mac_10g.v")
+         (C.create_exn ~name:"mac_10g_top" (M.create scope))))
+;;
+
 let udp_cmd =
   target ~summary:"UDP-over-MAC stack -> hardcaml_udp_with_mac.v" ~build:(fun scope ->
     emit
@@ -168,6 +181,8 @@ let () =
     (Command.group
        ~summary:"Hardcaml RTL generators (pick a target)"
        [ "mac", mac_cmd
+       ; "mac-10g", mac_10g_cmd ~flatten:false
+       ; "mac-10g-flat", mac_10g_cmd ~flatten:true
        ; "udp", udp_cmd
        ; "mac-validation", mac_validation_cmd
        ; "udp-tx-validation", udp_tx_validation_cmd

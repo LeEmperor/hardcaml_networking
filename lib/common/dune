@@ -7,6 +7,7 @@
   core
   hardcaml
   jane_rope
+  mac_10g_of_hardcaml
   mii_of_hardcaml
   udp_of_hardcaml
   uart_of_hardcaml
