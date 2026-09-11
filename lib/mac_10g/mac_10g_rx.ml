@@ -80,7 +80,11 @@ module Make (Config : Config) = struct
     [@@deriving sexp_of, compare ~localize, enumerate]
   end
 
-  (* Parser states are exposed numerically for waveform/debug visibility. *)
+  (* Parser states are exposed numerically for waveform/debug visibility. Ultimatley quite
+     poor; I eventually will standardize the approach I've taken to them, but still cannot
+     figure out a good canonical approach to it since larger-example designs don't exist
+     with enough structuring outside of maybe Hardcaml_circuits.Stack
+  *)
   let state_idle = 0
   let state_preamble_lane4 = 1
   let state_frame = 2
@@ -96,7 +100,7 @@ module Make (Config : Config) = struct
 
   (* Select byte [position] from the compact concatenation of the old tail and this
      cycle's data prefix. [tail_count] is only 0..4; the remaining mux arms are defensive
-     don't-care values.
+     don't-care values
   *)
   let combined_byte ~tail_data ~tail_count ~body_data position =
     mux
@@ -124,15 +128,41 @@ module Make (Config : Config) = struct
     let reg_var width = Always.Variable.reg ~enable:vdd ~width spec in
     let state = reg_var 3 in
 
+    (* forward declarations *)
+
+    (* crc reg *)
     let crc                     = reg_var 32 in
+
+    (* running 17b counter of the bytes in the frame *)
     let wire_length             = reg_var 17 in
-    let tail_data               = reg_var 32 in
-    let tail_count              = reg_var 3 in
+    let tail_data               = reg_var 32 in (* carried over bytes *)
+    let tail_count              = reg_var 3 in (* bytes carried over in tail_data *)
+
+    (* encoding error - /T seen in a bad neighborhood for example *)
     let xgmii_error             = reg_var 1 in
+    (* commit_ready_i was low but an error pended *)
     let pending_error           = reg_var Error.width in
+
+    (* while stalled in a commit, a new /S arrived - that frmae becomes lost;
+       overflow_pulse sticky fires once
+    *)
     let missed_while_committing = reg_var 1 in
+
+    (* Discard entered becuase of oversize *)
+    (* discard/commit paradigm used in speculative approach
+       either make it visible with buffer_commit_o
+        or rollback with buffer_rollback_o
+
+      Discard: frame died and we're discarding junk until a new /T
+      Commit: the frame was good, but the buffe wasn't ready to take the commit
+          thus we need to hold buffer_commit_o until consumed and NOT loose the error word
+    *)
     let discard_length_error    = reg_var 1 in
+
+    (* Discar entered because of encoding violation; supresses double counts *)
     let discard_xgmii_error     = reg_var 1 in
+
+    (* diagnostic counters *)
     let good_frames             = reg_var 64 in
     let bad_frames              = reg_var 64 in
     let bytes                   = reg_var 64 in
@@ -141,11 +171,12 @@ module Make (Config : Config) = struct
     let xgmii_errors            = reg_var 64 in
     let overflow_drops          = reg_var 64 in
 
-    let is_idle = state.value ==:. state_idle in
+    (* PPX maxxing *)
+    let is_idle           = state.value ==:. state_idle in
     let is_preamble_lane4 = state.value ==:. state_preamble_lane4 in
-    let is_frame = state.value ==:. state_frame in
-    let is_discard = state.value ==:. state_discard in
-    let is_commit = state.value ==:. state_commit in
+    let is_frame          = state.value ==:. state_frame in
+    let is_discard        = state.value ==:. state_discard in
+    let is_commit         = state.value ==:. state_commit in
 
     (* cousins of the XGMII library items *)
     let lane_byte     lane = byte i.xgmii_data_i lane in
@@ -266,7 +297,7 @@ module Make (Config : Config) = struct
     (* fold it to see if any of them are terminate-candidates *)
     let terminate_present = Array.reduce_exn terminate_at ~f:( |: ) in
 
-    (* *)
+    (* prefixed data bits -> to be used in combined *)
     let prefix_mask_bits =
       List.init 8 ~f:(fun lane -> (* 8 Signal.t list *)
           (* confirm all lanes before the terminate character are data lanes *)
@@ -283,18 +314,29 @@ module Make (Config : Config) = struct
     in
 
     (* build mask vector out of the prefix_mask_bits Signal.t list *)
+    (* where are the body data bytes? aka if we have a terminate somewhere, then only so much
+        of the beat is actually valid data info
+
+      this stops at the first control lane
+    *)
     let body_mask = concat_lsb prefix_mask_bits in
 
     (* pop_count out of the mask for ref *)
     let body_count = Mac_10g_axis.keep_byte_count body_mask in
 
+    (* find the terimination location - assuming that the body mask prefixing was legal *)
     let normal_terminate_at =
       List.init 8 ~f:(fun term_lane ->
-        let before_ok =
+
+        (* eveyrthing before the terminate has to be non-control words *)
+        let before_ok = (* for 0 to the lane we're touching, *)
           List.range 0 term_lane
-          |> List.fold ~init:vdd ~f:(fun ok lane -> ok &: ~:(body_lane_control lane))
+          |> List.fold ~init:vdd ~f:(fun ok lane ->
+              ok &: ~:(body_lane_control lane)
+            )
         in
 
+        (* after the terminate point, everything has to be Idle characters *)
         let after_ok =
           List.range (term_lane + 1) 8
           |> List.fold ~init:vdd ~f:(fun ok lane ->
@@ -306,42 +348,92 @@ module Make (Config : Config) = struct
             ok &: (inactive |: idle))
         in
 
-        terminate_at.(term_lane)
+        (* return the termination point, as well as packed on the fact that the before info is fine (non control mask),
+          and the after stuff is Idle
+        *)
+        terminate_at.(term_lane) (* array indexability heeheeheehaw *)
         &: before_ok &: after_ok
         )
     in
 
+    (* find the termination location as a list for vector comp later
+        if someone terminated correctly, it gets represented into this fold tree
+      *)
     let normal_terminate =
       List.reduce_exn
         normal_terminate_at ~f:( |: )
     in
 
+    (* junk with no terminate at all -> will ultimately pend for a resync *)
     let unexpected_control =
-      List.range 0 8
-      |> List.fold ~init:gnd ~f:(fun seen lane ->
+      List.range 0 8 (* from 0 to 7 *)
+      |> List.fold ~init:gnd ~f:(fun seen lane -> (* fold into *)
         seen
-        |: (body_lane_active lane &: body_lane_control lane &: ~:(terminate_at.(lane))))
+        |: (body_lane_active lane &: (* an or on the lane being active and control *)
+            body_lane_control lane &:
+            ~:(terminate_at.(lane)) (* active && control && terminate there = *)
+           )
+        )
     in
 
     (* A legal start seen while a frame is open terminates the malformed old frame, but
-       is also the earliest unambiguous point at which RX can resynchronize.  Reusing
-       that word avoids unnecessarily throwing away the following well-formed frame. *)
+       is also the earliest unambiguous point at which RX can resynchronize
+
+       Reusing that word avoids unnecessarily throwing away the following well-formed frame
+    *)
     let restart_lane0 = is_frame &: lane0_preamble_good in
     let restart_lane4 = is_frame &: ~:start_lane0 &: lane4_preamble_good in
     let restart_at_start = restart_lane0 |: restart_lane4 in
-    (* [enable_i] is part of the datapath handshake.  In particular, if software
+
+    (* [enable_i] is part of the datapath handshake.
+
+       in particular, if software
        disables RX in the middle of a frame we must not accept one last word before
-       rolling the speculative packet back. *)
+       rolling the speculative packet back
+    *)
     let processing_body =
-      i.enable_i &: (is_frame |: (is_preamble_lane4 &: lane4_finish_good))
+      i.enable_i &:
+      (is_frame |:
+       (is_preamble_lane4 &: lane4_finish_good)
+      )
     in
+
+    (* crc call *)
     let crc_after_body =
       Mac_10g_crc32.update crc.value ~data:body_data ~valid_bytes:body_mask
     in
-    let wire_length_after_body = wire_length.value +: uresize body_count ~width:17 in
-    let combined_count = uresize tail_count.value ~width:4 +: body_count in
-    let write_count = mux2 (combined_count >:. 4) (combined_count -:. 4) (zero 4) in
 
+    (* wire length [frame_counter] given the amount of body we're about to commit *)
+    let wire_length_after_body = wire_length.value +: (uresize body_count ~width:17) in
+
+    (* popcount on the tailcount and bodycount combinator *)
+    let combined_count =
+      (uresize tail_count.value ~width:4) +: body_count
+    in
+
+    (* write count into where? the packet_buffer *)
+    let write_count =
+      mux2
+        (* is the combined count greater than 4? *)
+        (combined_count >:. 4)
+        (* yes - eat the 4 *)
+        (combined_count -:. 4)
+        (* no - zero out *)
+        (zero 4)
+    in
+
+
+    (*
+       the last 4B of the frame are the FCS; must not reach the AXIS;
+       can't know the last is reached until /T is found and validated
+      therefore can't emit a byte until we've seen the 4 behind it
+
+       tail_data and tail_count are that 4B line
+
+      thus concat [tail; body] forms a 12B word
+
+      uses combined_count to count how many are in combined, similar to body_count
+    *)
     let combined =
       (* 12 indexed packed vector *)
       Array.init 12 ~f:(fun position ->
@@ -352,27 +444,51 @@ module Make (Config : Config) = struct
           position)
     in
 
-    let write_data = concat_lsb (List.init 8 ~f:(fun lane -> combined.(lane))) in
+    (* vector compose the list of lane candidates to be written *)
+    (* grabs the bottom 8B out of the combined vector *)
+    let write_data =
+      concat_lsb (List.init 8 ~f:(fun lane ->
+          combined.(lane)) (* grab the lane candidate, use it to form the 64b vector *)
+        )
+    in
+
+    (* generate a pop_count of the write candidate *)
     let write_keep = Mac_10g_axis.keep_of_byte_count write_count in
+
     let next_tail_count =
       mux2
+        (* is the combined_count greater than 4? *)
         (combined_count >=:. 4)
+
+        (* yes - set out 4 *)
         (of_int_trunc ~width:3 4)
+
+        (* no - stream the calculated count *)
         (uresize combined_count ~width:3)
     in
 
+    (* whole next tail vector; truly beautiful OCaml *)
     let next_tail_data =
       concat_lsb
-        (List.init 4 ~f:(fun lane ->
+        (List.init 4 ~f:(fun lane -> (* smash the vector into ... *)
            mux
-             combined_count
-             (List.init 16 ~f:(fun count ->
+             (* select on ? *)
+             combined_count (* 4b *)
+
+            (* given lane *)
+             (List.init 16 ~f:(fun count -> (* form 16 bytes as a candidate mask *)
                 if count = 0 || count > 12 || lane >= Int.min 4 count
                 then zero 8
                 else (
                   let start = Int.max 0 (count - 4) in
-                  combined.(start + lane))))))
+                  combined.(start + lane))
+                )
+             )
+           )
+        )
     in
+
+    (* diagnostic wires *)
     let final_fcs_error = ~:(Mac_10g_crc32.has_valid_residue crc_after_body) in
     let final_length_error =
       wire_length_after_body
@@ -383,23 +499,40 @@ module Make (Config : Config) = struct
     let final_error =
       concat_lsb [ final_fcs_error; final_length_error; final_xgmii_error ]
     in
+
+    (* was the final thing bad specifically? *)
     let final_bad = final_error <>:. 0 in
     let has_axis_payload = wire_length_after_body >:. 4 in
     let over_length = wire_length_after_body >: uresize i.max_frame_length_i ~width:17 in
+
+    (* for downstream prop; depends on error *)
     let buffer_write_valid =
       processing_body
       &: (write_count <>:. 0)
       &: ~:over_length
       &: ~:(unexpected_control &: ~:terminate_present)
     in
+
+    (* used for error prop and commit/discard entry *)
     let write_failed = buffer_write_valid &: ~:(i.buffer_write_ready_i) in
+
+    (* commit/discard paradigm signals *)
     let finish = processing_body &: terminate_present in
     let commit_request = finish &: has_axis_payload &: ~:write_failed &: ~:over_length in
     let commit = i.enable_i &: (commit_request |: is_commit) in
-    let commit_error = mux2 is_commit pending_error.value final_error in
+
+    let commit_error =
+      mux2
+        (* are we commiting? *)
+        is_commit
+        pending_error.value (* is the error pending? *)
+        final_error (* else final set error *)
+    in
+
     let disabled_rollback =
       ~:(i.enable_i) &: (is_preamble_lane4 |: is_frame |: is_commit)
     in
+
     let rollback =
       processing_body
       &: (write_failed |: over_length |: (unexpected_control &: ~:terminate_present))
@@ -420,18 +553,19 @@ module Make (Config : Config) = struct
       word_equal ~data:i.xgmii_data_i ~control:i.xgmii_control_i Xgmii.remote_fault_word
     in
 
-    let good_frame_pulse = Always.Variable.wire ~default:gnd () in
-    let bad_frame_pulse = Always.Variable.wire ~default:gnd () in
-    let overflow_pulse = Always.Variable.wire ~default:gnd () in
-    let completed_length = Always.Variable.wire ~default:(zero 17) () in
-    let fcs_error_pulse = Always.Variable.wire ~default:gnd () in
-    let length_error_pulse = Always.Variable.wire ~default:gnd () in
-    let xgmii_error_pulse = Always.Variable.wire ~default:gnd () in
+    let good_frame_pulse    = Always.Variable.wire ~default:gnd () in
+    let bad_frame_pulse     = Always.Variable.wire ~default:gnd () in
+    let overflow_pulse      = Always.Variable.wire ~default:gnd () in
+    let completed_length    = Always.Variable.wire ~default:(zero 17) () in
+    let fcs_error_pulse     = Always.Variable.wire ~default:gnd () in
+    let length_error_pulse  = Always.Variable.wire ~default:gnd () in
+    let xgmii_error_pulse   = Always.Variable.wire ~default:gnd () in
 
     Always.(
       compile
         [ if_
             ~:(i.enable_i)
+            (* reset state in Idle *)
             [ state <--. state_idle
             ; crc <-- Mac_10g_crc32.initial
             ; wire_length <--. 0
@@ -447,6 +581,7 @@ module Make (Config : Config) = struct
                 [ when_
                     start_lane0
                     [ if_
+                      (* zero set as we start, transition to start *)
                         lane0_preamble_good
                         [ state <--. state_frame
                         ; crc <-- Mac_10g_crc32.initial
@@ -462,6 +597,7 @@ module Make (Config : Config) = struct
                         ]
                     ]
                 ; when_
+                  (* exclusively on lane4 - might need a formal prop for no double 0 and 4 start *)
                     (~:start_lane0 &: start_lane4)
                     [ if_
                         lane4_preamble_good
@@ -479,6 +615,7 @@ module Make (Config : Config) = struct
                         ]
                     ]
                 ]
+
             ; when_
                 (is_preamble_lane4 &: ~:lane4_finish_good)
                 [ state <--. state_discard
@@ -486,6 +623,7 @@ module Make (Config : Config) = struct
                 ; bad_frame_pulse <-- vdd
                 ; xgmii_error_pulse <-- vdd
                 ]
+
             ; when_
                 processing_body
                 [ crc <-- crc_after_body
@@ -568,6 +706,7 @@ module Make (Config : Config) = struct
                         ]
                     ]
                 ]
+
             ; when_
                 is_commit
                 [ when_
@@ -592,14 +731,18 @@ module Make (Config : Config) = struct
                     ; missed_while_committing <--. 0
                     ]
                 ]
+
             ; when_
                 is_discard
+                (* discard state assignments; *)
                 [ when_
-                    terminate_present
+                    terminate_present (* we're done! *)
                     [ state <--. state_idle
                     ; when_
                         discard_length_error.value
-                        [ bad_frame_pulse <-- vdd; length_error_pulse <-- vdd ]
+                        [ bad_frame_pulse <-- vdd
+                        ; length_error_pulse <-- vdd
+                        ]
                     ; when_
                         discard_xgmii_error.value
                         [ (* malformed preambles were counted at detection *)
@@ -607,6 +750,7 @@ module Make (Config : Config) = struct
                         ]
                     ; discard_length_error <--. 0
                     ]
+
                 ; when_
                     start_lane0
                     [ if_
@@ -635,6 +779,7 @@ module Make (Config : Config) = struct
                     ]
                 ]
             ]
+
         ; if_
             i.counters_clear_i
             [ good_frames <--. 0
@@ -645,12 +790,18 @@ module Make (Config : Config) = struct
             ; xgmii_errors <--. 0
             ; overflow_drops <--. 0
             ]
-            [ when_ good_frame_pulse.value [ good_frames <-- good_frames.value +:. 1 ]
-            ; when_ bad_frame_pulse.value [ bad_frames <-- bad_frames.value +:. 1 ]
+            [ when_ good_frame_pulse.value
+                [ good_frames <-- good_frames.value +:. 1 ]
+
+            ; when_ bad_frame_pulse.value
+                [ bad_frames <-- bad_frames.value +:. 1 ]
+
             ; when_
                 (completed_length.value <>:. 0)
                 [ bytes <-- bytes.value +: uresize completed_length.value ~width:64 ]
+
             ; when_ fcs_error_pulse.value [ fcs_errors <-- fcs_errors.value +:. 1 ]
+
             ; when_
                 length_error_pulse.value
                 [ length_errors <-- length_errors.value +:. 1 ]
@@ -658,14 +809,15 @@ module Make (Config : Config) = struct
             ; when_ overflow_pulse.value [ overflow_drops <-- overflow_drops.value +:. 1 ]
             ]
         ]);
-    { O.buffer_write_data_o = write_data
-    ; buffer_write_keep_o = write_keep
-    ; buffer_write_valid_o = buffer_write_valid
-    ; buffer_commit_o = commit
-    ; buffer_rollback_o = rollback
-    ; buffer_commit_error_o = commit_error
-    ; state_o = state.value
-    ; good_frame_pulse_o = good_frame_pulse.value
+
+    { O.buffer_write_data_o     = write_data
+    ; buffer_write_keep_o       = write_keep
+    ; buffer_write_valid_o      = buffer_write_valid
+    ; buffer_commit_o           = commit
+    ; buffer_rollback_o         = rollback
+    ; buffer_commit_error_o     = commit_error
+    ; state_o                   = state.value
+    ; good_frame_pulse_o        = good_frame_pulse.value
     ; bad_frame_pulse_o = bad_frame_pulse.value
     ; overflow_pulse_o = overflow_pulse.value
     ; local_fault_o = local_fault
