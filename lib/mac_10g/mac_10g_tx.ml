@@ -332,7 +332,7 @@ let create (scope : Scope.t) (i : _ I.t) : _ O.t =
   (* gives us the size of the "body" of bytes that we're committing in this XGMII beat *)
   (* for [0 0 0 1 1 1 1 1 ], body_count = 5 *)
   (* = popcount(keep) *)
-  let body_count = Mac_10g_axis.keep_byte_count i.buffer_keep_i in
+  let body_count = Mac_10g_axis.byte_count_of_contiguous_keep i.buffer_keep_i in
 
   (* running CRC-covered body count; "once this body word is accepted, how many frame bytes WILL
     be covered" *)
