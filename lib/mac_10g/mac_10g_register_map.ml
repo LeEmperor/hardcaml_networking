@@ -78,3 +78,36 @@ module Counter_control = struct
   let snapshot = 0
   let clear = 1
 end
+
+(* Per-owner STATUS and IRQ masks, derived from the bit positions above rather than
+   restated as literals. Mac_10g_cdc gives each owner its own mask and merges the two
+   return mailboxes with a bitwise OR, so the TX and RX masks must stay disjoint; the
+   link-fault bits belong to the RX domain by convention. Mac_10g_regs masks the published
+   STATUS and IRQ words with the unions. *)
+module Mask = struct
+  let bit position = 1 lsl position
+
+  let tx_status =
+    bit Status.tx_active lor bit Status.tx_buffer_nonempty lor bit Status.tx_underflow
+  ;;
+
+  let rx_status =
+    bit Status.rx_active
+    lor bit Status.rx_buffer_nonempty
+    lor bit Status.rx_overflow
+    lor bit Status.local_fault
+    lor bit Status.remote_fault
+  ;;
+
+  let status = tx_status lor rx_status
+  let tx_irq = bit Irq.tx_drop lor bit Irq.tx_malformed_axi lor bit Irq.tx_underflow
+
+  let rx_irq =
+    bit Irq.rx_bad_frame
+    lor bit Irq.rx_overflow
+    lor bit Irq.local_fault
+    lor bit Irq.remote_fault
+  ;;
+
+  let irq = tx_irq lor rx_irq
+end

@@ -27,6 +27,7 @@ module Make (Config : Config) = struct
       ; reset_i : 'a
       ; enable_i : 'a
       ; counters_clear_i : 'a
+      ; max_frame_length_i : 'a [@bits 16]
       ; axis_data_i : 'a [@bits 64]
       ; axis_keep_i : 'a [@bits 8]
       ; axis_valid_i : 'a
@@ -69,6 +70,17 @@ module Make (Config : Config) = struct
     let dropping          = reg_var 1 in
     let malformed         = reg_var 1 in
     let pending_commit    = reg_var 1 in
+    let in_frame = reg_var 1 in
+    let frame_limit = reg_var 17 in
+    (* Capture the bounded wire limit on the first accepted beat. An enable or
+       length update cannot strand or reclassify a partially accepted frame. *)
+    let bounded_limit =
+      mux2 (i.max_frame_length_i >:. Config.max_supported_frame_length)
+        (of_int_trunc ~width:17 Config.max_supported_frame_length)
+        (uresize i.max_frame_length_i ~width:17)
+    in
+    let effective_limit = mux2 in_frame.value frame_limit.value bounded_limit in
+    let payload_limit = effective_limit -:. 4 in
 
     (* diag regs *)
     let drops             = reg_var 64 in
@@ -89,7 +101,7 @@ module Make (Config : Config) = struct
     let length_legal =
       frame_length_after_beat
       >=:. 14
-      &: (frame_length_after_beat <=:. Config.max_supported_frame_length - 4)
+      &: (frame_length_after_beat <=: payload_limit)
     in
     (* The packet buffer has no maximum-frame guard of its own, so an over-length frame
        has to be rejected on the beat that crosses the limit, not at [axis_last_i].
@@ -99,7 +111,7 @@ module Make (Config : Config) = struct
        it means anything.
     *)
     let over_length =
-      (frame_length_after_beat >:. Config.max_supported_frame_length - 4) -- "over_length"
+      (frame_length_after_beat >: payload_limit) -- "over_length"
     in
 
     let final_rejected = i.axis_last_i &: (i.axis_user_i |: ~:length_legal) in
@@ -107,7 +119,7 @@ module Make (Config : Config) = struct
 
     (* enable fanout might be bad *)
     let ready =
-      (i.enable_i
+      ((i.enable_i |: in_frame.value) &: ~:(i.reset_i)
        &: ~:(pending_commit.value)
        &: mux2 (dropping.value |: reject_current) vdd i.buffer_write_ready_i)
       -- "axis_ready"
@@ -138,7 +150,9 @@ module Make (Config : Config) = struct
     (* main seq blocks  *)
     Always.(
       compile
-        [ if_
+        [ when_ (accepted &: ~:(in_frame.value)) [ frame_limit <-- bounded_limit ]
+        ; when_ accepted [ in_frame <-- ~:(i.axis_last_i) ]
+        ; if_
             i.counters_clear_i (* clear all counters? *)
 
             (* yes - self explanatory *)

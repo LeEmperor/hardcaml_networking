@@ -59,7 +59,13 @@ module O = struct
   [@@deriving hardcaml]
 end
 
-let create ?(max_supported_frame_length = 1518) scope (i : _ I.t) : _ O.t =
+let create
+  ?(max_supported_frame_length = 1518)
+  ?(soft_reset_cycles = 16)
+  scope
+  (i : _ I.t)
+  : _ O.t
+  =
   let feedback = Mac_10g_cdc.O.map Mac_10g_cdc.O.port_widths ~f:wire in
   let regs =
     Mac_10g_regs.hierarchical
@@ -87,6 +93,7 @@ let create ?(max_supported_frame_length = 1518) scope (i : _ I.t) : _ O.t =
   let cdc =
     Mac_10g_cdc.hierarchical
       ~max_supported_frame_length
+      ~soft_reset_cycles
       scope
       { axi_clock_i = i.axi_clock_i
       ; axi_reset_i = i.axi_reset_i
@@ -124,7 +131,11 @@ let create ?(max_supported_frame_length = 1518) scope (i : _ I.t) : _ O.t =
   }
 ;;
 
-let hierarchical ?(max_supported_frame_length = 1518) scope i =
+let hierarchical ?(max_supported_frame_length = 1518) ?(soft_reset_cycles = 16) scope i =
   let module H = Hierarchy.In_scope (I) (O) in
-  H.hierarchical ~scope ~name:"mac_10g_control" (create ~max_supported_frame_length) i
+  H.hierarchical
+    ~scope
+    ~name:"mac_10g_control"
+    (create ~max_supported_frame_length ~soft_reset_cycles)
+    i
 ;;
