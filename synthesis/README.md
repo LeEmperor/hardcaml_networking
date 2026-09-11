@@ -16,6 +16,7 @@ The available targets are:
 | `rx-controller` | `Rx_controller` |
 | `mac-rx-path` | `Mac_rx_path` |
 | `mac-tx-path` | `Mac_tx_path` (IPv4 ethertype) |
+| `mac-10g-tx` | `Mac_10g_tx` XGMII formatter and DIC scheduler |
 | `udp-ipv4-tx` | `Udp_duplex_mac_top.Tx_path` |
 | `udp-ipv4-rx` | `Udp_duplex_mac_top.Rx_path` |
 | `mac-top` | `Mac_top` (hardware RX async FIFO, IPv4 ethertype) |
@@ -98,6 +99,20 @@ For an architectural path, replace the target and use its `clock_i` port:
   -run
 ```
 
+The 10G formatter target uses a 6.4 ns clock constraint for its 156.25 MHz XGMII
+domain. For the Alveo U50 speed-grade target, generate or run it with:
+
+```sh
+./scripts/with-switch.sh dune exec synthesis/xilinx_reports.exe -- mac-10g-tx \
+  -dir _build/xilinx-reports/timing/mac-10g-tx \
+  -part xcu50-fsvh2104-2-e \
+  -clock clock_i:156.25 \
+  -hierarchy \
+  -full-design-hierarchy true \
+  -jobs 1 \
+  -run
+```
+
 The MAC and duplex targets are multi-clock. Specify both actual top-level clock ports:
 
 ```sh
@@ -170,3 +185,51 @@ current run before it prints a successful summary.
 
 See `docs/hardcaml_xilinx_reports_plan.md` for the staged adoption plan and the path to
 multi-clock and board-level reporting.
+
+
+
+# Example Commands for the TX Path of the 10G MAC 
+
+Here we have post-synthesis which is a very naive report, and then we have things like post-placement or post-route. Ultimately a tad finer tuned than one might require but nice that the knobs exist. 
+
+Post-synth is somewhat useless for small designs, but for larger designs where P&R takes hours, this might not be the worst usage. 
+
+Default to "Post-Route" runs for more accurate items.
+  Post-synthesis:
+
+  ./scripts/with-switch.sh dune exec synthesis/xilinx_reports.exe -- mac-10g-tx \
+    -dir _build/xilinx-reports/timing/mac-10g-tx-post-synth \
+    -part xcu50-fsvh2104-2-e \
+    -clock clock_i:156.25 \
+    -hierarchy \
+    -full-design-hierarchy true \
+    -jobs 1 \
+    -path-to-vivado /home/wayne/tools/xilinx/vivado25_install/2025.2.1/Vivado/bin/vivado \
+    -run
+
+  Post-placement:
+
+  ./scripts/with-switch.sh dune exec synthesis/xilinx_reports.exe -- mac-10g-tx \
+    -dir _build/xilinx-reports/timing/mac-10g-tx-post-place \
+    -part xcu50-fsvh2104-2-e \
+    -clock clock_i:156.25 \
+    -hierarchy \
+    -full-design-hierarchy true \
+    -jobs 1 \
+    -path-to-vivado /home/wayne/tools/xilinx/vivado25_install/2025.2.1/Vivado/bin/vivado \
+    -place \
+    -run
+
+  Post-route:
+
+  ./scripts/with-switch.sh dune exec synthesis/xilinx_reports.exe -- mac-10g-tx \
+    -dir _build/xilinx-reports/timing/mac-10g-tx-post-route \
+    -part xcu50-fsvh2104-2-e \
+    -clock clock_i:156.25 \
+    -hierarchy \
+    -full-design-hierarchy true \
+    -jobs 1 \
+    -path-to-vivado /home/wayne/tools/xilinx/vivado25_install/2025.2.1/Vivado/bin/vivado \
+    -place \
+    -route \
+    -run

@@ -1,6 +1,7 @@
 open! Core
 open! Async
 open! Mii_of_hardcaml
+open! Mac_10g_of_hardcaml
 open! Udp_of_hardcaml
 module Reports = Hardcaml_xilinx_reports
 module Tx_crc_command = Reports.Command.With_interface (Tx_crc.I) (Tx_crc.O)
@@ -17,6 +18,8 @@ module Mac_rx_path_command =
 
 module Mac_tx_path_command =
   Reports.Command.With_interface (Mac_tx_path.I) (Mac_tx_path.O)
+
+module Mac_10g_tx_command = Reports.Command.With_interface (Mac_10g_tx.I) (Mac_10g_tx.O)
 
 module Udp_ipv4_tx_command =
   Reports.Command.With_interface
@@ -244,6 +247,13 @@ let () =
                ~name:"mac_tx_path"
                ~flags
                (Mac_tx_path.create ~ethertype:0x0800)) )
+       ; ( "mac-10g-tx"
+         , report_command ~name:"mac_10g_tx" (fun flags ->
+             Mac_10g_tx_command.run
+               ~primitive_groups
+               ~name:"mac_10g_tx"
+               ~flags
+               Mac_10g_tx.create) )
        ; ( "udp-ipv4-tx"
          , report_command ~name:"udp_ipv4_tx" (fun flags ->
              Udp_ipv4_tx_command.run
