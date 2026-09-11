@@ -15,6 +15,7 @@ open! Signal
  *   dune exec lib/common/generate.exe -- udp-tx-validation
  *   dune exec lib/common/generate.exe -- udp-rx-validation
  *   dune exec lib/common/generate.exe -- udp-loopback-validation
+ *   dune exec lib/common/generate.exe -- u50-10g-tx-validation
  *
  * Targets:
  *   mac                    standalone Ethernet MAC        -> hardcaml_eth_mac.v
@@ -24,6 +25,8 @@ open! Signal
  *   udp-rx-validation      board UDP RX harness (laptop->fpga, 1B/s drain) -> validation/udp_rx_validation_harness.v
  *   udp-duplex-validation  board full-duplex UDP harness, DECOUPLED TX+RX -> validation/udp_duplex_validation_harness.v
  *   udp-loopback-validation board echo/loopback UDP harness, RX->TX bridge -> validation/udp_loopback_validation_harness.v
+ *   u50-10g-tx-validation  Alveo U50 10G TX harness (autonomous source + Mac_10g_top)
+ *                          -> validation/alveo_u50_10g/u50_mac_tx_harness.v
  *
  * Naming: the UDP full-duplex tops are distinguished by coupling --
  *   duplex   = independent TX + RX side-by-side on one Mac_top (no coupling)
@@ -176,6 +179,21 @@ let udp_loopback_validation_cmd =
            (Udp_loopback_validation_harness.create scope)))
 ;;
 
+(* Alveo U50 10G validation harnesses. Unlike the Arty tops these are not board tops: they
+   are emitted to be instantiated inside u50_10g_top.sv alongside the AMD PCS/GT IP. See
+   docs/mac_10g_u50_tx_validation_plan.md. *)
+let u50_10g_tx_validation_cmd =
+  target
+    ~summary:"Alveo U50 10G TX harness -> validation/alveo_u50_10g/u50_mac_tx_harness.v"
+    ~build:(fun scope ->
+      let module C = Circuit.With_interface (U50_mac_tx_harness.I) (U50_mac_tx_harness.O)
+      in
+      emit
+        ~scope
+        ~path:"validation/alveo_u50_10g/u50_mac_tx_harness.v"
+        (C.create_exn ~name:"u50_mac_tx_harness" (U50_mac_tx_harness.create scope)))
+;;
+
 let () =
   Command_unix.run
     (Command.group
@@ -189,5 +207,6 @@ let () =
        ; "udp-rx-validation", udp_rx_validation_cmd
        ; "udp-duplex-validation", udp_duplex_validation_cmd
        ; "udp-loopback-validation", udp_loopback_validation_cmd
+       ; "u50-10g-tx-validation", u50_10g_tx_validation_cmd
        ])
 ;;

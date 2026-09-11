@@ -11,7 +11,8 @@
   mii_of_hardcaml
   udp_of_hardcaml
   uart_of_hardcaml
-  mac_validation)
+  mac_validation
+  u50_validation)
  (modules generate)
  (flags
   (:standard -w -27-57-33-34-35-40-63-47-26))
