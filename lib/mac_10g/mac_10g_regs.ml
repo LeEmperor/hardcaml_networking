@@ -52,8 +52,8 @@ module O = struct
   [@@deriving hardcaml]
 end
 
-let irq_mask = 0x00000f07
-let status_mask = 0x0003030f
+let irq_mask = Map.Mask.irq
+let status_mask = Map.Mask.status
 
 let create ?(max_supported_frame_length = 1518) (_scope : Scope.t) (i : _ I.t) : _ O.t =
   if max_supported_frame_length < 64 || max_supported_frame_length > 65535
