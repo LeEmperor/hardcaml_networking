@@ -83,3 +83,15 @@ let%test_unit "masked CRC agrees for generated data, masks, and starting states"
         ~expect:(Crc32.masked_bytes ~init:crc bytes ~valid_bytes))
     generator
 ;;
+
+let%test_unit "prefix keep decoder matches all zero-through-eight byte counts" =
+  let open Hardcaml in
+  List.iter (List.range 0 9) ~f:(fun count ->
+    let keep = Signal.of_int_trunc ~width:8 ((1 lsl count) - 1) in
+    let actual =
+      Mac_10g_of_hardcaml.Mac_10g_axis.byte_count_of_contiguous_keep keep
+      |> Signal.to_bits
+      |> Bits.to_int_trunc
+    in
+    [%test_result: int] actual ~expect:count)
+;;

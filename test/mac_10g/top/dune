@@ -1,0 +1,17 @@
+(library
+ (name mac_10g_top_inline_tests)
+ (inline_tests
+  (flags
+   (:standard -source-tree-root .)))
+ (libraries
+  core
+  hardcaml
+  hardcaml_event_driven_sim
+  mac_10g_of_hardcaml
+  hardcaml_verif)
+ (preprocess
+  (pps ppx_hardcaml ppx_jane))
+ (lint
+  (pps ppx_js_style))
+ (flags
+  (:standard -w -27-57-33-34-35-40-63-47-26)))

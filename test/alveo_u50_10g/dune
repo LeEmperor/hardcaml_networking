@@ -1,0 +1,16 @@
+; Alveo U50 validation-harness tests. The harness itself is board scaffolding, but the
+; frame source is real RTL that decides exactly what goes on the wire, so it gets the
+; same treatment as anything in lib/: simulated here, checked byte for byte.
+
+(library
+ (name u50_validation_inline_tests)
+ (inline_tests
+  (flags
+   (:standard -source-tree-root .)))
+ (libraries core hardcaml u50_validation)
+ (preprocess
+  (pps ppx_hardcaml ppx_jane))
+ (lint
+  (pps ppx_js_style))
+ (flags
+  (:standard -w -27-57-33-34-35-40-63-47-26)))

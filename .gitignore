@@ -32,3 +32,7 @@ release-group/*
 validation/vivado25_proj/
 __pycache__/
 .Xil/
+
+# generated 10G MAC RTL (regenerate with scripts/generate_rtl.py)
+hardcaml_mac_10g.v
+hardcaml_mac_10g_flat.v

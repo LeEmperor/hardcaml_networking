@@ -70,11 +70,23 @@ type scaffold_summary =
 
 let scaffold_summary () =
   let scope = Scope.create ~flatten_design:true () in
-  let inputs =
-    Dut.I.map Dut.I.port_names_and_widths ~f:(fun (name, width) ->
-      Signal.input name width)
+  let module Sim = Cyclesim.With_interface (Dut.I) (Dut.O) in
+  let sim =
+    Sim.create
+      (Dut.create
+         ~tx_buffer_depth_bytes:64
+         ~rx_buffer_depth_bytes:64
+         ~max_supported_frame_length:64
+         scope)
   in
-  let outputs = Dut.create scope inputs in
+  let i = Cyclesim.inputs sim in
+  i.tx_reset_i := Bits.vdd;
+  i.rx_reset_i := Bits.vdd;
+  i.axi_reset_i := Bits.vdd;
+  Cyclesim.cycle sim;
+  let outputs =
+    Dut.O.map (Cyclesim.outputs sim) ~f:(fun value -> Signal.of_bits !value)
+  in
   let int signal = Signal.to_bits signal |> Bits.to_int_trunc in
   { tx_ready = int outputs.s_axis_tx_tready_o
   ; tx_xgmii =

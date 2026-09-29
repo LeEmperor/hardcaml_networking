@@ -106,7 +106,7 @@ let%test_unit "legal default and boundary configurations elaborate" =
     ~expect:(Ok ())
 ;;
 
-let%test_unit "the Phase-0 scaffold exposes only safe inactive outputs" =
+let%test_unit "the integrated top exposes safe inactive outputs during reset" =
   [%test_result: scaffold_summary]
     (scaffold_summary ())
     ~expect:

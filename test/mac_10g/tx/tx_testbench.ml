@@ -80,6 +80,7 @@ module Dut = struct
         ; reset_i = i.reset_i
         ; enable_i = i.enable_i
         ; counters_clear_i = i.counters_clear_i
+        ; max_frame_length_i = of_int_trunc ~width:16 255
         ; axis_data_i = i.data_i
         ; axis_keep_i = i.keep_i
         ; axis_valid_i = i.valid_i

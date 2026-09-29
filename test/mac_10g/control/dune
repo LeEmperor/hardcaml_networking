@@ -1,0 +1,25 @@
+(library
+ (name mac_10g_control_inline_tests)
+ (modules
+  control_testbench
+  control_unit_quickcheck_tests
+  control_expect_tests
+  control_hierarchy_tests)
+ ; ppx_expect needs the runner's source directory (see test/test_architecture.md).
+ (inline_tests
+  (flags
+   (:standard -source-tree-root .)))
+ (libraries core hardcaml hardcaml_event_driven_sim mac_10g_of_hardcaml)
+ (preprocess
+  (pps ppx_hardcaml ppx_jane))
+ (lint
+  (pps ppx_js_style))
+ (flags
+  (:standard -w -27-57-33-34-35-40-63-47-26)))
+
+(executable
+ (name control_rtl)
+ (modules control_rtl)
+ (libraries core hardcaml mac_10g_of_hardcaml)
+ (preprocess
+  (pps ppx_jane)))
